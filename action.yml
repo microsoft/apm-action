@@ -1,0 +1,42 @@
+name: 'APM - Agent Package Manager'
+description: 'Install agent primitives (skills, instructions, agents) for your CI workflows. One line. Zero config.'
+author: 'microsoft'
+branding:
+  icon: 'package'
+  color: 'purple'
+
+inputs:
+  working-directory:
+    description: 'Working directory for execution'
+    required: false
+    default: '.'
+  apm-version:
+    description: 'APM version to install (default: latest stable)'
+    required: false
+    default: 'latest'
+  script:
+    description: 'APM script to run after install+compile (optional — by default only install+compile runs)'
+    required: false
+    default: ''
+  dependencies:
+    description: 'Inline dependency list (one per line). Used when no apm.yml exists. Accepts owner/repo, HTTPS URLs, SSH URLs.'
+    required: false
+    default: ''
+  isolated:
+    description: 'Install to an isolated workspace instead of the repo .github/ (prevents instruction pollution)'
+    required: false
+    default: 'false'
+  skip-compile:
+    description: 'Skip AGENTS.md compilation after install'
+    required: false
+    default: 'false'
+
+outputs:
+  success:
+    description: 'Whether the action succeeded (true/false)'
+  primitives-path:
+    description: 'Path where agent primitives were deployed (e.g., .github or /tmp/apm-isolated/.github)'
+
+runs:
+  using: 'node20'
+  main: 'dist/index.js'
