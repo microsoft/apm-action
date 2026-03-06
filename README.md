@@ -20,12 +20,12 @@ This installs the APM CLI, reads your `apm.yml`, and runs `apm install`.
     working-directory: './my-project'  # custom working directory
 ```
 
-### Inline dependencies (no apm.yml needed)
+### Isolated mode (inline dependencies, no apm.yml needed)
 
 ```yaml
 - uses: microsoft/apm-action@v1
   with:
-    skip-manifest: 'true'
+    isolated: 'true'
     dependencies: |
       - microsoft/apm-sample-package
 ```
@@ -38,7 +38,7 @@ This installs the APM CLI, reads your `apm.yml`, and runs `apm install`.
 | `apm-version` | No | `latest` | APM version to install |
 | `script` | No | | APM script to run after install |
 | `dependencies` | No | | YAML array of extra dependencies to install (additive to apm.yml) |
-| `skip-manifest` | No | `false` | Skip apm.yml — install only inline dependencies |
+| `isolated` | No | `false` | Ignore apm.yml and pre-existing primitives — install only inline dependencies into a clean `.github/` |
 | `compile` | No | `false` | Run `apm compile` after install to generate AGENTS.md |
 
 ## Outputs

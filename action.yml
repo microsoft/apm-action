@@ -22,8 +22,8 @@ inputs:
     description: 'YAML array of extra dependencies to install (additive to apm.yml). Supports strings (owner/repo) and objects ({git: url, path: subdir, ref: branch}).'
     required: false
     default: ''
-  skip-manifest:
-    description: 'Skip apm.yml — install only the inline dependencies'
+  isolated:
+    description: 'Ignore apm.yml and pre-existing primitives — install only the inline dependencies into a clean .github/'
     required: false
     default: 'false'
   compile:

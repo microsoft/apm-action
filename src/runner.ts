@@ -10,7 +10,7 @@ import { ensureApmInstalled } from './installer';
  *
  * Default behavior (no inputs): reads apm.yml, runs apm install. Done.
  * With `dependencies` input: parses YAML array, installs each as extra deps (additive to apm.yml).
- * With `skip-manifest: true`: ignores apm.yml, installs only inline deps.
+ * With `isolated: true`: clears existing primitives, ignores apm.yml, installs only inline deps.
  * With `compile: true`: runs apm compile after install to generate AGENTS.md.
  * With `script` input: runs an apm script after install.
  */
@@ -26,12 +26,12 @@ export async function run(): Promise<void> {
 
     // 3. Parse inputs
     const depsInput = core.getInput('dependencies').trim();
-    const skipManifest = core.getInput('skip-manifest') === 'true';
+    const isolated = core.getInput('isolated') === 'true';
 
-    // 4. Handle skip-manifest: generate a minimal apm.yml from inline deps only
-    if (skipManifest) {
+    // 4. Handle isolated mode: clear existing primitives, generate apm.yml from inline deps only
+    if (isolated) {
       if (!depsInput) {
-        throw new Error('skip-manifest requires dependencies input');
+        throw new Error('isolated mode requires dependencies input');
       }
 
       // Clean existing primitives so only inline deps remain
@@ -150,7 +150,7 @@ async function installDeps(dir: string, deps: Dependency[]): Promise<void> {
 const PRIMITIVE_DIRS = ['instructions', 'agents', 'skills', 'prompts'] as const;
 
 /**
- * Remove existing primitive directories so skip-manifest starts from a clean slate.
+ * Remove existing primitive directories so isolated mode starts from a clean slate.
  */
 function clearPrimitives(dir: string): void {
   for (const sub of PRIMITIVE_DIRS) {
@@ -163,7 +163,7 @@ function clearPrimitives(dir: string): void {
 }
 
 /**
- * Generate a fresh apm.yml from inline dependencies (used with skip-manifest).
+ * Generate a fresh apm.yml from inline dependencies (used with isolated mode).
  */
 function generateManifest(dir: string, deps: Dependency[]): void {
   const apmYmlPath = path.join(dir, 'apm.yml');
@@ -182,7 +182,7 @@ function generateManifest(dir: string, deps: Dependency[]): void {
 
   const content = `name: inline-workflow\nversion: 1.0.0\ndependencies:\n  apm:\n${depEntries.join('\n')}\n`;
   fs.writeFileSync(apmYmlPath, content, 'utf-8');
-  core.info(`Generated apm.yml with ${deps.length} dependencies (skip-manifest mode)`);
+  core.info(`Generated apm.yml with ${deps.length} dependencies (isolated mode)`);
 }
 
 /**

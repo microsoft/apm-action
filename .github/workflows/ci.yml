@@ -71,8 +71,8 @@ jobs:
           fi
           echo "✅ Primitives deployed from manifest"
 
-  # Integration: skip-manifest (inline deps only, ignores apm.yml)
-  test-skip-manifest:
+  # Integration: isolated mode (inline deps only, clean .github/)
+  test-isolated:
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -88,14 +88,14 @@ jobs:
               - microsoft/apm-sample-package/.apm/agents/design-reviewer.agent.md
           EOF
 
-      - name: Test - skip-manifest with inline deps
+      - name: Test - isolated with inline deps
         uses: ./
         with:
-          skip-manifest: 'true'
+          isolated: 'true'
           dependencies: |
             - microsoft/apm-sample-package/.apm/skills/style-checker
 
-      - name: Verify skip-manifest used inline deps, not manifest
+      - name: Verify isolated mode used only inline deps
         run: |
           if ! find .github/skills -type f -name "SKILL.md" 2>/dev/null | grep -q .; then
             echo "::error::Skill primitive not deployed — inline deps were not used"
@@ -109,7 +109,7 @@ jobs:
             echo "::error::Instruction primitive found — pre-existing primitives were NOT cleared"
             exit 1
           fi
-          echo "✅ skip-manifest cleared existing primitives, installed only inline deps"
+          echo "✅ Isolated mode: cleared existing primitives, installed only inline deps"
 
   # Integration: compile flag
   test-compile:
@@ -118,10 +118,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Test - skip-manifest + compile
+      - name: Test - isolated + compile
         uses: ./
         with:
-          skip-manifest: 'true'
+          isolated: 'true'
           compile: 'true'
           dependencies: |
             - microsoft/apm-sample-package
@@ -136,7 +136,7 @@ jobs:
 
   # Release: update major version tag (v1 → v1.x.x)
   release:
-    needs: [build, test-manifest, test-skip-manifest, test-compile]
+    needs: [build, test-manifest, test-isolated, test-compile]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
