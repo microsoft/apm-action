@@ -182,6 +182,8 @@ async function runApm(args: string[], cwd: string): Promise<void> {
 
 /**
  * List deployed primitives for visibility.
+ * Outputs a compact summary line first (survives GH AW 500-char truncation),
+ * then per-file details.
  */
 async function listDeployed(primitivesPath: string): Promise<void> {
   if (!fs.existsSync(primitivesPath)) {
@@ -189,20 +191,36 @@ async function listDeployed(primitivesPath: string): Promise<void> {
     return;
   }
 
-  const subdirs = ['instructions', 'skills', 'agents', 'prompts'];
+  const subdirs = ['instructions', 'skills', 'agents', 'prompts'] as const;
+  const counts: Record<string, string[]> = {};
+  let total = 0;
+
   for (const sub of subdirs) {
     const subPath = path.join(primitivesPath, sub);
     if (fs.existsSync(subPath)) {
-      const files = fs.readdirSync(subPath);
+      const files = fs.readdirSync(subPath).filter(f => !f.startsWith('.'));
       if (files.length > 0) {
-        core.info(`  ${sub}/: ${files.join(', ')}`);
+        counts[sub] = files;
+        total += files.length;
       }
     }
   }
 
-  // Check for AGENTS.md
-  const agentsMd = path.join(primitivesPath, '..', 'AGENTS.md');
-  if (fs.existsSync(agentsMd)) {
-    core.info('  AGENTS.md compiled');
+  const hasAgentsMd = fs.existsSync(path.join(primitivesPath, '..', 'AGENTS.md'));
+
+  if (total === 0) {
+    core.info('APM: no primitives deployed');
+    return;
+  }
+
+  // Compact summary line — MUST come first so it survives truncation
+  const breakdown = Object.entries(counts)
+    .map(([type, files]) => `${files.length} ${type}`)
+    .join(', ');
+  core.info(`APM: ${total} primitives deployed (${breakdown})${hasAgentsMd ? ' + AGENTS.md' : ''}`);
+
+  // Per-file details (may get truncated — that's OK, headline has the key info)
+  for (const [sub, files] of Object.entries(counts)) {
+    core.info(`  ${sub}/: ${files.join(', ')}`);
   }
 }
