@@ -1,3 +1,4 @@
 node_modules/
 *.js.map
 src/**/*.js
+dist/*.d.ts.map

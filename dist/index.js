@@ -29883,7 +29883,7 @@ const installer_1 = __nccwpck_require__(7651);
  *
  * Default behavior (no inputs): reads apm.yml, runs apm install. Done.
  * With `dependencies` input: parses YAML array, installs each as extra deps (additive to apm.yml).
- * With `skip-manifest: true`: ignores apm.yml, installs only inline deps.
+ * With `isolated: true`: clears existing primitives, ignores apm.yml, installs only inline deps.
  * With `compile: true`: runs apm compile after install to generate AGENTS.md.
  * With `script` input: runs an apm script after install.
  */
@@ -29897,12 +29897,14 @@ async function run() {
         core.info(`Working directory: ${resolvedDir}`);
         // 3. Parse inputs
         const depsInput = core.getInput('dependencies').trim();
-        const skipManifest = core.getInput('skip-manifest') === 'true';
-        // 4. Handle skip-manifest: generate a minimal apm.yml from inline deps only
-        if (skipManifest) {
+        const isolated = core.getInput('isolated') === 'true';
+        // 4. Handle isolated mode: clear existing primitives, generate apm.yml from inline deps only
+        if (isolated) {
             if (!depsInput) {
-                throw new Error('skip-manifest requires dependencies input');
+                throw new Error('isolated mode requires dependencies input');
             }
+            // Clean existing primitives so only inline deps remain
+            clearPrimitives(resolvedDir);
             const deps = parseDependencies(depsInput);
             await generateManifest(resolvedDir, deps);
             await runApm(['install'], resolvedDir);
@@ -29999,8 +30001,26 @@ async function installDeps(dir, deps) {
         }
     }
 }
+const PRIMITIVE_DIRS = ['instructions', 'agents', 'skills', 'prompts'];
 /**
- * Generate a fresh apm.yml from inline dependencies (used with skip-manifest).
+ * Remove existing primitive directories so isolated mode starts from a clean slate.
+ */
+function clearPrimitives(dir) {
+    const workspace = process.env.GITHUB_WORKSPACE ?? process.cwd();
+    const resolved = path.resolve(dir);
+    if (!resolved.startsWith(path.resolve(workspace))) {
+        throw new Error(`clearPrimitives: resolved dir "${resolved}" is outside workspace "${workspace}"`);
+    }
+    for (const sub of PRIMITIVE_DIRS) {
+        const subPath = path.join(resolved, '.github', sub);
+        if (fs.existsSync(subPath)) {
+            fs.rmSync(subPath, { recursive: true });
+            core.info(`Cleared .github/${sub}/`);
+        }
+    }
+}
+/**
+ * Generate a fresh apm.yml from inline dependencies (used with isolated mode).
  */
 function generateManifest(dir, deps) {
     const apmYmlPath = path.join(dir, 'apm.yml');
@@ -30020,7 +30040,7 @@ function generateManifest(dir, deps) {
     });
     const content = `name: inline-workflow\nversion: 1.0.0\ndependencies:\n  apm:\n${depEntries.join('\n')}\n`;
     fs.writeFileSync(apmYmlPath, content, 'utf-8');
-    core.info(`Generated apm.yml with ${deps.length} dependencies (skip-manifest mode)`);
+    core.info(`Generated apm.yml with ${deps.length} dependencies (isolated mode)`);
 }
 /**
  * Run an apm command in the given directory.
@@ -30037,6 +30057,8 @@ async function runApm(args, cwd) {
 }
 /**
  * List deployed primitives for visibility.
+ * Outputs a compact summary line first (survives GH AW 500-char truncation),
+ * then per-file details.
  */
 async function listDeployed(primitivesPath) {
     if (!fs.existsSync(primitivesPath)) {
@@ -30044,19 +30066,36 @@ async function listDeployed(primitivesPath) {
         return;
     }
     const subdirs = ['instructions', 'skills', 'agents', 'prompts'];
+    const counts = {};
+    let total = 0;
     for (const sub of subdirs) {
         const subPath = path.join(primitivesPath, sub);
         if (fs.existsSync(subPath)) {
-            const files = fs.readdirSync(subPath);
+            const files = fs.readdirSync(subPath).filter(f => !f.startsWith('.'));
             if (files.length > 0) {
-                core.info(`  ${sub}/: ${files.join(', ')}`);
+                counts[sub] = files;
+                total += files.length;
             }
         }
     }
-    // Check for AGENTS.md
-    const agentsMd = path.join(primitivesPath, '..', 'AGENTS.md');
-    if (fs.existsSync(agentsMd)) {
-        core.info('  AGENTS.md compiled');
+    const hasAgentsMd = fs.existsSync(path.join(primitivesPath, '..', 'AGENTS.md'));
+    if (total === 0) {
+        if (hasAgentsMd) {
+            core.info('APM: no primitives deployed (AGENTS.md present)');
+        }
+        else {
+            core.info('APM: no primitives deployed');
+        }
+        return;
+    }
+    // Compact summary line — MUST come first so it survives truncation
+    const breakdown = Object.entries(counts)
+        .map(([type, files]) => `${files.length} ${type}`)
+        .join(', ');
+    core.info(`APM: ${total} primitives deployed (${breakdown})${hasAgentsMd ? ' + AGENTS.md' : ''}`);
+    // Per-file details (may get truncated — that's OK, headline has the key info)
+    for (const [sub, files] of Object.entries(counts)) {
+        core.info(`  ${sub}/: ${files.join(', ')}`);
     }
 }
 

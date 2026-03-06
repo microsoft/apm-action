@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify dist/ is up-to-date
+        run: |
+          CHANGED=$(git diff --name-only dist/ | grep -v '\.d\.ts\.map$' || true)
+          if [ -n "$CHANGED" ]; then
+            echo "::error::dist/ is out of date. Run 'npm run build' and commit the result."
+            echo "$CHANGED"
+            exit 1
+          fi
+
+  # Integration: default flow (apm.yml manifest)
+  test-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create test apm.yml
+        run: |
+          cat > apm.yml << 'EOF'
+          name: ci-test
+          version: 1.0.0
+          dependencies:
+            apm:
+              - microsoft/apm-sample-package
+          EOF
+
+      - name: Test - install from apm.yml
+        uses: ./
+
+      - name: Verify primitives deployed from manifest
+        run: |
+          if ! find .github -type f \( -name "*.instructions.md" -o -name "*.agent.md" -o -name "*.prompt.md" -o -name "SKILL.md" \) | grep -q .; then
+            echo "::error::No primitives deployed from apm.yml"
+            exit 1
+          fi
+          echo "✅ Primitives deployed from manifest"
+
+  # Integration: isolated mode (inline deps only, clean .github/)
+  test-isolated:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create apm.yml that should be ignored
+        run: |
+          cat > apm.yml << 'EOF'
+          name: should-be-ignored
+          version: 1.0.0
+          dependencies:
+            apm:
+              - microsoft/apm-sample-package/.apm/agents/design-reviewer.agent.md
+          EOF
+
+      - name: Plant pre-existing primitives that should be cleared
+        run: |
+          mkdir -p .github/agents .github/instructions
+          echo '# Stale agent' > .github/agents/stale.agent.md
+          echo '# Stale instruction' > .github/instructions/stale.instructions.md
+
+      - name: Test - isolated with inline deps
+        uses: ./
+        with:
+          isolated: 'true'
+          dependencies: |
+            - microsoft/apm-sample-package/.apm/skills/style-checker
+
+      - name: Verify isolated mode used only inline deps
+        run: |
+          if ! find .github/skills -type f -name "SKILL.md" 2>/dev/null | grep -q .; then
+            echo "::error::Skill primitive not deployed — inline deps were not used"
+            exit 1
+          fi
+          if find .github/agents -type f -name "*.agent.md" 2>/dev/null | grep -q .; then
+            echo "::error::Agent primitive found — pre-existing primitives were NOT cleared"
+            exit 1
+          fi
+          if find .github/instructions -type f -name "*.instructions.md" 2>/dev/null | grep -q .; then
+            echo "::error::Instruction primitive found — pre-existing primitives were NOT cleared"
+            exit 1
+          fi
+          echo "✅ Isolated mode: cleared existing primitives, installed only inline deps"
+
+  # Integration: compile flag
+  test-compile:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Test - isolated + compile
+        uses: ./
+        with:
+          isolated: 'true'
+          compile: 'true'
+          dependencies: |
+            - microsoft/apm-sample-package
+
+      - name: Verify AGENTS.md compiled
+        run: |
+          if [ ! -f "AGENTS.md" ]; then
+            echo "::error::AGENTS.md not found — compile did not run"
+            exit 1
+          fi
+          echo "✅ AGENTS.md compiled successfully"
+
+  # Release: update major version tag (v1 → v1.x.x)
+  release:
+    needs: [build, test-manifest, test-isolated, test-compile]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Update major version tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          MAJOR="${TAG%%.*}"
+          git tag -f "$MAJOR" "$TAG"
+          git push origin "$MAJOR" --force
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true

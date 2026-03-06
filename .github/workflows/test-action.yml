@@ -10,7 +10,7 @@ jobs:
     name: Install with inline dependencies (additive)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Run apm-action with inline deps
         uses: microsoft/apm-action@main
@@ -50,22 +50,22 @@ jobs:
 
           echo "SUCCESS: $TOTAL primitive files deployed to .github"
 
-  test-skip-manifest:
-    name: Install with skip-manifest (exclusive)
+  test-isolated:
+    name: Install with isolated mode (exclusive)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - name: Run apm-action with skip-manifest
+      - name: Run apm-action with isolated mode
         uses: microsoft/apm-action@main
         with:
-          skip-manifest: 'true'
+          isolated: 'true'
           dependencies: |
             - microsoft/apm-sample-package
 
       - name: Verify primitives deployed
         run: |
-          echo "=== Checking .github primitives (skip-manifest) ==="
+          echo "=== Checking .github primitives (isolated) ==="
 
           TOTAL=$(find .github -type f | grep -v workflows | wc -l)
           if [ "$TOTAL" -eq 0 ]; then
@@ -73,13 +73,13 @@ jobs:
             exit 1
           fi
 
-          echo "SUCCESS: $TOTAL primitive files deployed via skip-manifest"
+          echo "SUCCESS: $TOTAL primitive files deployed via isolated mode"
 
   test-with-compile:
     name: Install + compile from apm.yml
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Create test apm.yml
         run: |
