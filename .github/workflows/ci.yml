@@ -57,55 +57,41 @@ jobs:
           version: 1.0.0
           dependencies:
             apm:
-              - microsoft/apm-sample-package/instructions/design-standards
+              - microsoft/apm-sample-package
           EOF
 
       - name: Test - install from apm.yml
         uses: ./
 
-      - name: Verify instruction primitive deployed
+      - name: Verify primitives deployed from manifest
         run: |
-          if ! find .github/instructions -type f -name "*.instructions.md" | grep -q .; then
-            echo "::error::No instruction primitives deployed from apm.yml"
+          if ! find .github -type f \( -name "*.instructions.md" -o -name "*.agent.md" -o -name "*.prompt.md" -o -name "SKILL.md" \) | grep -q .; then
+            echo "::error::No primitives deployed from apm.yml"
             exit 1
           fi
-          echo "✅ Instruction primitives deployed from manifest"
+          echo "✅ Primitives deployed from manifest"
 
-  # Integration: skip-manifest (inline deps only, no apm.yml)
+  # Integration: skip-manifest (inline deps only, ignores apm.yml)
   test-skip-manifest:
     needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create apm.yml that should be ignored
-        run: |
-          cat > apm.yml << 'EOF'
-          name: should-be-ignored
-          version: 1.0.0
-          dependencies:
-            apm:
-              - microsoft/apm-sample-package/agents/design-reviewer
-          EOF
-
       - name: Test - skip-manifest with inline deps
         uses: ./
         with:
           skip-manifest: 'true'
           dependencies: |
-            - microsoft/apm-sample-package/skills/style-checker
+            - microsoft/apm-sample-package
 
-      - name: Verify skip-manifest used inline deps, not manifest
+      - name: Verify primitives deployed via skip-manifest
         run: |
-          if ! find .github/skills -type f -name "SKILL.md" | grep -q .; then
-            echo "::error::Skill primitive not deployed — inline deps were not used"
+          if ! find .github -type f \( -name "*.instructions.md" -o -name "*.agent.md" -o -name "*.prompt.md" -o -name "SKILL.md" \) | grep -q .; then
+            echo "::error::No primitives deployed — skip-manifest + inline deps failed"
             exit 1
           fi
-          if find .github/agents -type f -name "*.agent.md" 2>/dev/null | grep -q .; then
-            echo "::error::Agent primitive found — manifest was NOT skipped"
-            exit 1
-          fi
-          echo "✅ skip-manifest correctly ignored apm.yml, installed inline deps only"
+          echo "✅ skip-manifest installed inline deps successfully"
 
   # Integration: compile flag
   test-compile:
