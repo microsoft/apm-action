@@ -1,4 +1,4 @@
-name: 'APM - Agent Package Manager'
+name: 'Setup APM'
 description: 'Install agent primitives (skills, instructions, agents) for your CI workflows. One line. Zero config.'
 author: 'microsoft'
 branding:
