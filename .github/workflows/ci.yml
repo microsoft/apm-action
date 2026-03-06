@@ -1,0 +1,154 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify dist/ is up-to-date
+        run: |
+          if [ "$(git diff --name-only dist/)" != "" ]; then
+            echo "::error::dist/ is out of date. Run 'npm run build' and commit the result."
+            git diff --stat dist/
+            exit 1
+          fi
+
+  # Integration: default flow (apm.yml manifest)
+  test-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create test apm.yml
+        run: |
+          cat > apm.yml << 'EOF'
+          name: ci-test
+          version: 1.0.0
+          dependencies:
+            apm:
+              - microsoft/apm-sample-package/instructions/design-standards
+          EOF
+
+      - name: Test - install from apm.yml
+        uses: ./
+
+      - name: Verify instruction primitive deployed
+        run: |
+          if ! find .github/instructions -type f -name "*.instructions.md" | grep -q .; then
+            echo "::error::No instruction primitives deployed from apm.yml"
+            exit 1
+          fi
+          echo "✅ Instruction primitives deployed from manifest"
+
+  # Integration: skip-manifest (inline deps only, no apm.yml)
+  test-skip-manifest:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create apm.yml that should be ignored
+        run: |
+          cat > apm.yml << 'EOF'
+          name: should-be-ignored
+          version: 1.0.0
+          dependencies:
+            apm:
+              - microsoft/apm-sample-package/agents/design-reviewer
+          EOF
+
+      - name: Test - skip-manifest with inline deps
+        uses: ./
+        with:
+          skip-manifest: 'true'
+          dependencies: |
+            - microsoft/apm-sample-package/skills/style-checker
+
+      - name: Verify skip-manifest used inline deps, not manifest
+        run: |
+          if ! find .github/skills -type f -name "SKILL.md" | grep -q .; then
+            echo "::error::Skill primitive not deployed — inline deps were not used"
+            exit 1
+          fi
+          if find .github/agents -type f -name "*.agent.md" 2>/dev/null | grep -q .; then
+            echo "::error::Agent primitive found — manifest was NOT skipped"
+            exit 1
+          fi
+          echo "✅ skip-manifest correctly ignored apm.yml, installed inline deps only"
+
+  # Integration: compile flag
+  test-compile:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Test - skip-manifest + compile
+        uses: ./
+        with:
+          skip-manifest: 'true'
+          compile: 'true'
+          dependencies: |
+            - microsoft/apm-sample-package
+
+      - name: Verify AGENTS.md compiled
+        run: |
+          if [ ! -f "AGENTS.md" ]; then
+            echo "::error::AGENTS.md not found — compile did not run"
+            exit 1
+          fi
+          echo "✅ AGENTS.md compiled successfully"
+
+  # Release: update major version tag (v1 → v1.x.x)
+  release:
+    needs: [build, test-manifest, test-skip-manifest, test-compile]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Update major version tag
+        run: |
+          TAG="${GITHUB_REF#refs/tags/}"
+          MAJOR="${TAG%%.*}"
+          git tag -f "$MAJOR" "$TAG"
+          git push origin "$MAJOR" --force
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
