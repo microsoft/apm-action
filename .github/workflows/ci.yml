@@ -7,19 +7,24 @@ on:
   pull_request:
     branches: [main]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 permissions:
   contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
 
       - name: Install dependencies
@@ -50,6 +55,7 @@ jobs:
   test-manifest:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
 
@@ -78,6 +84,7 @@ jobs:
   test-isolated:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
 
@@ -124,6 +131,7 @@ jobs:
   test-compile:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
 
@@ -147,6 +155,7 @@ jobs:
   test-pack:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
 
@@ -199,6 +208,7 @@ jobs:
   test-restore-artifact:
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
 
@@ -245,6 +255,7 @@ jobs:
     needs: [build, test-manifest, test-isolated, test-compile, test-pack, test-restore-artifact]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       contents: write
     steps:
