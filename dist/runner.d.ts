@@ -10,3 +10,11 @@
  * With `bundle` input: restores from a bundle (no APM install needed).
  */
 export declare function run(): Promise<void>;
+/**
+ * Remove existing primitive directories so isolated mode starts from a clean slate.
+ *
+ * Security: each computed sub-path is validated to stay within the resolved
+ * working directory, preventing path-traversal regardless of where the
+ * directory lives on the filesystem.
+ */
+export declare function clearPrimitives(dir: string): void;

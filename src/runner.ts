@@ -185,16 +185,30 @@ const PRIMITIVE_DIRS = ['instructions', 'agents', 'skills', 'prompts'] as const;
 
 /**
  * Remove existing primitive directories so isolated mode starts from a clean slate.
+ *
+ * Security: each computed sub-path is validated to stay within the resolved
+ * working directory, preventing path-traversal regardless of where the
+ * directory lives on the filesystem.
  */
-function clearPrimitives(dir: string): void {
-  const workspace = process.env.GITHUB_WORKSPACE ?? process.cwd();
+export function clearPrimitives(dir: string): void {
   const resolved = path.resolve(dir);
-  if (!resolved.startsWith(path.resolve(workspace))) {
-    throw new Error(`clearPrimitives: resolved dir "${resolved}" is outside workspace "${workspace}"`);
+  const ghDir = path.join(resolved, '.github');
+
+  // Nothing to clear — empty directory already satisfies isolated mode
+  if (!fs.existsSync(ghDir)) {
+    core.info('No .github/ directory found — nothing to clear');
+    return;
   }
 
   for (const sub of PRIMITIVE_DIRS) {
     const subPath = path.join(resolved, '.github', sub);
+    // Guard: ensure computed path stays within the working directory
+    const realSub = path.resolve(subPath);
+    if (!realSub.startsWith(resolved + path.sep) && realSub !== resolved) {
+      throw new Error(
+        `clearPrimitives: path traversal detected — "${realSub}" escapes working directory "${resolved}"`,
+      );
+    }
     if (fs.existsSync(subPath)) {
       fs.rmSync(subPath, { recursive: true });
       core.info(`Cleared .github/${sub}/`);
