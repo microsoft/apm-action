@@ -30,12 +30,30 @@ inputs:
     description: 'Run apm compile after install to generate AGENTS.md'
     required: false
     default: 'false'
+  pack:
+    description: 'Pack an APM bundle after install (produces .tar.gz by default)'
+    required: false
+    default: 'false'
+  bundle:
+    description: 'Restore from a bundle (local path or glob pattern). Skips APM installation entirely.'
+    required: false
+    default: ''
+  target:
+    description: 'Bundle target: vscode, claude, or all (used with pack: true)'
+    required: false
+    default: ''
+  archive:
+    description: 'Produce .tar.gz instead of directory (used with pack: true)'
+    required: false
+    default: 'true'
 
 outputs:
   success:
     description: 'Whether the action succeeded (true/false)'
   primitives-path:
     description: 'Path where agent primitives were deployed (.github)'
+  bundle-path:
+    description: 'Path to the packed bundle (only set in pack mode)'
 
 runs:
   using: 'node20'

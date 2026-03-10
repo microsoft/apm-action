@@ -30,6 +30,84 @@ This installs the APM CLI, reads your `apm.yml`, and runs `apm install`.
       - microsoft/apm-sample-package
 ```
 
+### Pack mode (produce a bundle)
+
+Install dependencies and pack them into a self-contained `.tar.gz` archive. Combine with `actions/upload-artifact` to share across jobs.
+
+```yaml
+- uses: microsoft/apm-action@v2
+  id: pack
+  with:
+    pack: 'true'
+    target: 'vscode'
+
+- uses: actions/upload-artifact@v4
+  with:
+    name: agent-bundle
+    path: ${{ steps.pack.outputs.bundle-path }}
+```
+
+### Restore mode (zero-install)
+
+Restore primitives from a bundle — no APM installation, no Python, no network. If APM happens to be on PATH, it uses `apm unpack` for integrity verification; otherwise it falls back to `tar xzf`.
+
+```yaml
+- uses: actions/download-artifact@v4
+  with:
+    name: agent-bundle
+
+- uses: microsoft/apm-action@v2
+  with:
+    bundle: './*.tar.gz'
+```
+
+### Cross-job artifact workflow
+
+Pack once, restore everywhere — identical primitives across all consumer jobs.
+
+```yaml
+jobs:
+  agent-config:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/apm-action@v2
+        id: pack
+        with:
+          pack: 'true'
+          target: 'vscode'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: agent-bundle
+          path: ${{ steps.pack.outputs.bundle-path }}
+
+  lint:
+    needs: agent-config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-bundle
+      - uses: microsoft/apm-action@v2
+        with:
+          bundle: './*.tar.gz'
+      # .github/ is ready — primitives deployed
+
+  deploy:
+    needs: agent-config
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: agent-bundle
+      - uses: microsoft/apm-action@v2
+        with:
+          bundle: './*.tar.gz'
+      # Same primitives, different job. Byte-identical.
+```
+
 ## Inputs
 
 | Input | Required | Default | Description |
@@ -38,8 +116,12 @@ This installs the APM CLI, reads your `apm.yml`, and runs `apm install`.
 | `apm-version` | No | `latest` | APM version to install |
 | `script` | No | | APM script to run after install |
 | `dependencies` | No | | YAML array of extra dependencies to install (additive to apm.yml) |
-| `isolated` | No | `false` | Ignore apm.yml and clear pre-existing primitive dirs (`instructions/`, `agents/`, `skills/`, `prompts/`) under `.github/` — install only inline dependencies |
+| `isolated` | No | `false` | Ignore apm.yml and clear pre-existing primitive dirs — install only inline dependencies |
 | `compile` | No | `false` | Run `apm compile` after install to generate AGENTS.md |
+| `pack` | No | `false` | Pack a bundle after install (produces `.tar.gz` by default) |
+| `bundle` | No | | Restore from a bundle (local path or glob). Skips APM installation entirely. |
+| `target` | No | | Bundle target: `vscode`, `claude`, or `all` (used with `pack: true`) |
+| `archive` | No | `true` | Produce `.tar.gz` instead of directory (used with `pack: true`) |
 
 ## Outputs
 
@@ -47,6 +129,7 @@ This installs the APM CLI, reads your `apm.yml`, and runs `apm install`.
 |---|---|
 | `success` | Whether the action succeeded (`true`/`false`) |
 | `primitives-path` | Path where agent primitives were deployed (`.github`) |
+| `bundle-path` | Path to the packed bundle (only set in pack mode) |
 
 ## Third-Party Dependencies
 

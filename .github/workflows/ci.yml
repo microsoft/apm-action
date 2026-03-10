@@ -143,9 +143,106 @@ jobs:
           fi
           echo "✅ AGENTS.md compiled successfully"
 
+  # Integration: pack mode (install → pack → verify bundle output)
+  test-pack:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create test apm.yml
+        run: |
+          cat > apm.yml << 'EOF'
+          name: ci-test-pack
+          version: 1.0.0
+          dependencies:
+            apm:
+              - microsoft/apm-sample-package
+          EOF
+
+      - name: Test - install + pack
+        id: pack
+        uses: ./
+        with:
+          pack: 'true'
+          target: 'vscode'
+
+      - name: Verify bundle-path output is set
+        run: |
+          BUNDLE="${{ steps.pack.outputs.bundle-path }}"
+          if [ -z "$BUNDLE" ]; then
+            echo "::error::bundle-path output not set"
+            exit 1
+          fi
+          echo "Bundle path: $BUNDLE"
+
+      - name: Verify bundle archive exists and is valid
+        run: |
+          BUNDLE="${{ steps.pack.outputs.bundle-path }}"
+          if [ ! -f "$BUNDLE" ]; then
+            echo "::error::Bundle file not found: $BUNDLE"
+            exit 1
+          fi
+          # Verify it's a valid gzip archive
+          if ! file "$BUNDLE" | grep -q 'gzip'; then
+            echo "::error::Bundle is not a valid gzip archive"
+            exit 1
+          fi
+          # Verify it contains .github/ content
+          if ! tar tzf "$BUNDLE" | grep -q '.github/'; then
+            echo "::error::Bundle does not contain .github/ directory"
+            exit 1
+          fi
+          echo "✅ Pack mode: bundle produced and valid"
+
+  # Integration: restore from artifact (cross-job pack → upload → download → restore)
+  test-restore-artifact:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create test apm.yml
+        run: |
+          cat > apm.yml << 'EOF'
+          name: ci-test-restore
+          version: 1.0.0
+          dependencies:
+            apm:
+              - microsoft/apm-sample-package
+          EOF
+
+      - name: Pack bundle
+        id: pack
+        uses: ./
+        with:
+          pack: 'true'
+          target: 'vscode'
+
+      - name: Clear deployed primitives (simulate fresh consumer)
+        run: |
+          rm -rf .github/instructions .github/agents .github/skills .github/prompts
+          echo "Cleared .github/ primitives"
+
+      - name: Copy bundle to workspace root (simulate download-artifact)
+        run: cp "${{ steps.pack.outputs.bundle-path }}" ./
+
+      - name: Test - restore from local bundle
+        uses: ./
+        with:
+          bundle: './*.tar.gz'
+
+      - name: Verify primitives restored
+        run: |
+          if ! find .github -type f \( -name "*.instructions.md" -o -name "*.agent.md" -o -name "*.prompt.md" -o -name "SKILL.md" \) | grep -q .; then
+            echo "::error::No primitives found after restore"
+            exit 1
+          fi
+          echo "✅ Restore mode: primitives restored from bundle"
+
   # Release: update major version tag (v1 → v1.x.x)
   release:
-    needs: [build, test-manifest, test-isolated, test-compile]
+    needs: [build, test-manifest, test-isolated, test-compile, test-pack, test-restore-artifact]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
