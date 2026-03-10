@@ -31,14 +31,15 @@ export async function resolveLocalBundle(pattern: string, workspaceDir: string):
     throw new Error(`Multiple bundles match '${pattern}': ${list}. Use an exact path.`);
   }
 
-  const bundlePath = matches[0];
+  const resolvedBundle = path.resolve(matches[0]);
 
   // Path traversal protection: ensure resolved path is within workspace
-  if (!path.resolve(bundlePath).startsWith(resolvedWorkspace)) {
+  const relative = path.relative(resolvedWorkspace, resolvedBundle);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
     throw new Error(`Bundle path "${pattern}" resolves outside the workspace`);
   }
 
-  return bundlePath;
+  return resolvedBundle;
 }
 
 /**
@@ -131,9 +132,14 @@ function findBundle(buildDir: string, archive: boolean): string {
   const entries = fs.readdirSync(buildDir);
 
   if (archive) {
-    const archives = entries.filter(e => e.endsWith('.tar.gz'));
+    const archives = entries.filter(e => e.endsWith('.tar.gz')).sort();
     if (archives.length === 0) {
       throw new Error('No .tar.gz archive found in build directory after apm pack');
+    }
+    if (archives.length > 1) {
+      throw new Error(
+        `Multiple .tar.gz archives found in build directory after apm pack: ${archives.join(', ')}`,
+      );
     }
     return path.join(buildDir, archives[0]);
   }
@@ -142,9 +148,14 @@ function findBundle(buildDir: string, archive: boolean): string {
   const dirs = entries.filter(e => {
     if (e.startsWith('.')) return false;
     return fs.statSync(path.join(buildDir, e)).isDirectory();
-  });
+  }).sort();
   if (dirs.length === 0) {
     throw new Error('No bundle directory found in build directory after apm pack');
+  }
+  if (dirs.length > 1) {
+    throw new Error(
+      `Multiple bundle directories found in build directory after apm pack: ${dirs.join(', ')}`,
+    );
   }
   return path.join(buildDir, dirs[0]);
 }

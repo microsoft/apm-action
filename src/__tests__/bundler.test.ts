@@ -191,6 +191,26 @@ describe('runPackStep', () => {
     expect(result).toContain('test-pkg-1.0.0');
   });
 
+  it('throws when multiple archives found', async () => {
+    fs.writeFileSync(path.join(buildDir, 'pkg-a-1.0.tar.gz'), 'fake');
+    fs.writeFileSync(path.join(buildDir, 'pkg-b-2.0.tar.gz'), 'fake');
+
+    mockExec.mockResolvedValue(0);
+
+    await expect(runPackStep(tmpDir, { archive: true }))
+      .rejects.toThrow('Multiple .tar.gz archives found in build directory after apm pack');
+  });
+
+  it('throws when multiple bundle directories found', async () => {
+    fs.mkdirSync(path.join(buildDir, 'pkg-a'), { recursive: true });
+    fs.mkdirSync(path.join(buildDir, 'pkg-b'), { recursive: true });
+
+    mockExec.mockResolvedValue(0);
+
+    await expect(runPackStep(tmpDir, { archive: false }))
+      .rejects.toThrow('Multiple bundle directories found in build directory after apm pack');
+  });
+
   it('throws when apm pack fails', async () => {
     mockExec.mockResolvedValue(1);
 
