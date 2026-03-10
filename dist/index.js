@@ -37280,10 +37280,11 @@ function clearPrimitives(dir) {
         return;
     }
     for (const sub of PRIMITIVE_DIRS) {
-        const subPath = __nccwpck_require__.ab + "apm-action/" + resolved + '/.github/' + sub;
+        const subPath = external_path_.join(resolved, '.github', sub);
         // Guard: ensure computed path stays within the working directory
-        if (!subPath.startsWith(resolved + external_path_.sep) && subPath !== resolved) {
-            throw new Error(`clearPrimitives: path traversal detected — "${subPath}" escapes working directory "${resolved}"`);
+        const realSub = external_path_.resolve(subPath);
+        if (!realSub.startsWith(resolved + external_path_.sep) && realSub !== resolved) {
+            throw new Error(`clearPrimitives: path traversal detected — "${realSub}" escapes working directory "${resolved}"`);
         }
         if (external_fs_namespaceObject.existsSync(subPath)) {
             external_fs_namespaceObject.rmSync(subPath, { recursive: true });

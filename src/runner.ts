@@ -201,11 +201,12 @@ export function clearPrimitives(dir: string): void {
   }
 
   for (const sub of PRIMITIVE_DIRS) {
-    const subPath = path.resolve(resolved, '.github', sub);
+    const subPath = path.join(resolved, '.github', sub);
     // Guard: ensure computed path stays within the working directory
-    if (!subPath.startsWith(resolved + path.sep) && subPath !== resolved) {
+    const realSub = path.resolve(subPath);
+    if (!realSub.startsWith(resolved + path.sep) && realSub !== resolved) {
       throw new Error(
-        `clearPrimitives: path traversal detected — "${subPath}" escapes working directory "${resolved}"`,
+        `clearPrimitives: path traversal detected — "${realSub}" escapes working directory "${resolved}"`,
       );
     }
     if (fs.existsSync(subPath)) {
