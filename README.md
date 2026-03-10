@@ -35,7 +35,7 @@ This installs the APM CLI, reads your `apm.yml`, and runs `apm install`.
 Install dependencies and pack them into a self-contained `.tar.gz` archive. Combine with `actions/upload-artifact` to share across jobs.
 
 ```yaml
-- uses: microsoft/apm-action@v2
+- uses: microsoft/apm-action@v1
   id: pack
   with:
     pack: 'true'
@@ -56,7 +56,7 @@ Restore primitives from a bundle — no APM installation, no Python, no network.
   with:
     name: agent-bundle
 
-- uses: microsoft/apm-action@v2
+- uses: microsoft/apm-action@v1
   with:
     bundle: './*.tar.gz'
 ```
@@ -71,7 +71,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: microsoft/apm-action@v2
+      - uses: microsoft/apm-action@v1
         id: pack
         with:
           pack: 'true'
@@ -89,7 +89,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: agent-bundle
-      - uses: microsoft/apm-action@v2
+      - uses: microsoft/apm-action@v1
         with:
           bundle: './*.tar.gz'
       # .github/ is ready — primitives deployed
@@ -102,7 +102,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: agent-bundle
-      - uses: microsoft/apm-action@v2
+      - uses: microsoft/apm-action@v1
         with:
           bundle: './*.tar.gz'
       # Same primitives, different job. Byte-identical.
