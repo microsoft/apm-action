@@ -37282,9 +37282,9 @@ function clearPrimitives(dir) {
     for (const sub of PRIMITIVE_DIRS) {
         const subPath = external_path_.join(resolved, '.github', sub);
         // Guard: ensure computed path stays within the working directory
-        const realSub = external_path_.resolve(subPath);
-        if (!realSub.startsWith(resolved + external_path_.sep) && realSub !== resolved) {
-            throw new Error(`clearPrimitives: path traversal detected — "${realSub}" escapes working directory "${resolved}"`);
+        const rel = external_path_.relative(resolved, external_path_.resolve(subPath));
+        if (rel.startsWith('..') || external_path_.isAbsolute(rel)) {
+            throw new Error(`clearPrimitives: path traversal detected — "${subPath}" escapes working directory "${resolved}"`);
         }
         if (external_fs_namespaceObject.existsSync(subPath)) {
             external_fs_namespaceObject.rmSync(subPath, { recursive: true });

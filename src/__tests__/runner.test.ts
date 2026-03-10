@@ -80,21 +80,22 @@ describe('clearPrimitives', () => {
     const prevWorkspace = process.env.GITHUB_WORKSPACE;
     process.env.GITHUB_WORKSPACE = '/home/runner/work/gh-aw/gh-aw';
 
-    const ghDir = path.join(tmpDir, '.github');
-    fs.mkdirSync(path.join(ghDir, 'agents'), { recursive: true });
-    fs.writeFileSync(path.join(ghDir, 'agents', 'test.md'), '# agent');
+    try {
+      const ghDir = path.join(tmpDir, '.github');
+      fs.mkdirSync(path.join(ghDir, 'agents'), { recursive: true });
+      fs.writeFileSync(path.join(ghDir, 'agents', 'test.md'), '# agent');
 
-    // Should NOT throw — the old code threw here
-    clearPrimitives(tmpDir);
+      // Should NOT throw — the old code threw here
+      clearPrimitives(tmpDir);
 
-    expect(fs.existsSync(path.join(ghDir, 'agents'))).toBe(false);
-    expect(mockInfo).toHaveBeenCalledWith('Cleared .github/agents/');
-
-    // Restore
-    if (prevWorkspace === undefined) {
-      delete process.env.GITHUB_WORKSPACE;
-    } else {
-      process.env.GITHUB_WORKSPACE = prevWorkspace;
+      expect(fs.existsSync(path.join(ghDir, 'agents'))).toBe(false);
+      expect(mockInfo).toHaveBeenCalledWith('Cleared .github/agents/');
+    } finally {
+      if (prevWorkspace === undefined) {
+        delete process.env.GITHUB_WORKSPACE;
+      } else {
+        process.env.GITHUB_WORKSPACE = prevWorkspace;
+      }
     }
   });
 
