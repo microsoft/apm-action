@@ -1,24 +1,30 @@
-import { resolveLocalBundle, extractBundle, runPackStep } from '../bundler';
-import * as exec from '@actions/exec';
-import * as glob from '@actions/glob';
-import * as fs from 'fs';
-import * as path from 'path';
+import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-jest.mock('@actions/core', () => ({
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// ESM mocking: set up mocks before dynamic imports
+const mockExec = jest.fn<(cmd: string, args?: string[], options?: object) => Promise<number>>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const mockGlobCreate = jest.fn<any>();
+
+jest.unstable_mockModule('@actions/core', () => ({
   info: jest.fn(),
   warning: jest.fn(),
 }));
 
-jest.mock('@actions/exec', () => ({
-  exec: jest.fn(),
+jest.unstable_mockModule('@actions/exec', () => ({
+  exec: mockExec,
 }));
 
-jest.mock('@actions/glob', () => ({
-  create: jest.fn(),
+jest.unstable_mockModule('@actions/glob', () => ({
+  create: mockGlobCreate,
 }));
 
-const mockExec = exec.exec as jest.MockedFunction<typeof exec.exec>;
-const mockGlobCreate = glob.create as jest.MockedFunction<typeof glob.create>;
+// Dynamic import after mocks are set up
+const { resolveLocalBundle, extractBundle, runPackStep } = await import('../bundler.js');
 
 describe('resolveLocalBundle', () => {
   it('returns path when exactly one file matches', async () => {
@@ -26,10 +32,10 @@ describe('resolveLocalBundle', () => {
     const match = '/workspace/bundle.tar.gz';
 
     mockGlobCreate.mockResolvedValue({
-      glob: jest.fn().mockResolvedValue([match]),
-      getSearchPaths: jest.fn().mockReturnValue([]),
+      glob: jest.fn<() => Promise<string[]>>().mockResolvedValue([match]),
+      getSearchPaths: jest.fn<() => string[]>().mockReturnValue([]),
       globGenerator: jest.fn(),
-    } as unknown as ReturnType<typeof glob.create> extends Promise<infer T> ? T : never);
+    });
 
     const result = await resolveLocalBundle('./bundle.tar.gz', workspace);
     expect(result).toBe(match);
@@ -37,10 +43,10 @@ describe('resolveLocalBundle', () => {
 
   it('throws when no files match', async () => {
     mockGlobCreate.mockResolvedValue({
-      glob: jest.fn().mockResolvedValue([]),
-      getSearchPaths: jest.fn().mockReturnValue([]),
+      glob: jest.fn<() => Promise<string[]>>().mockResolvedValue([]),
+      getSearchPaths: jest.fn<() => string[]>().mockReturnValue([]),
       globGenerator: jest.fn(),
-    } as unknown as ReturnType<typeof glob.create> extends Promise<infer T> ? T : never);
+    });
 
     await expect(resolveLocalBundle('./missing-*.tar.gz', '/workspace'))
       .rejects.toThrow('No bundle found matching: ./missing-*.tar.gz');
@@ -49,13 +55,13 @@ describe('resolveLocalBundle', () => {
   it('throws when multiple files match', async () => {
     const workspace = '/workspace';
     mockGlobCreate.mockResolvedValue({
-      glob: jest.fn().mockResolvedValue([
+      glob: jest.fn<() => Promise<string[]>>().mockResolvedValue([
         '/workspace/bundle-a.tar.gz',
         '/workspace/bundle-b.tar.gz',
       ]),
-      getSearchPaths: jest.fn().mockReturnValue([]),
+      getSearchPaths: jest.fn<() => string[]>().mockReturnValue([]),
       globGenerator: jest.fn(),
-    } as unknown as ReturnType<typeof glob.create> extends Promise<infer T> ? T : never);
+    });
 
     await expect(resolveLocalBundle('./*.tar.gz', workspace))
       .rejects.toThrow("Multiple bundles match './*.tar.gz'");
@@ -64,10 +70,10 @@ describe('resolveLocalBundle', () => {
   it('throws when resolved path is outside workspace', async () => {
     const workspace = '/workspace';
     mockGlobCreate.mockResolvedValue({
-      glob: jest.fn().mockResolvedValue(['/outside/evil.tar.gz']),
-      getSearchPaths: jest.fn().mockReturnValue([]),
+      glob: jest.fn<() => Promise<string[]>>().mockResolvedValue(['/outside/evil.tar.gz']),
+      getSearchPaths: jest.fn<() => string[]>().mockReturnValue([]),
       globGenerator: jest.fn(),
-    } as unknown as ReturnType<typeof glob.create> extends Promise<infer T> ? T : never);
+    });
 
     await expect(resolveLocalBundle('../outside/evil.tar.gz', workspace))
       .rejects.toThrow('resolves outside the workspace');
@@ -80,7 +86,6 @@ describe('extractBundle', () => {
 
   beforeEach(() => {
     jest.clearAllMocks();
-    // Create tmp dir and a fake bundle file
     fs.mkdirSync(tmpDir, { recursive: true });
     fs.writeFileSync(bundlePath, 'fake-archive');
   });
@@ -90,8 +95,7 @@ describe('extractBundle', () => {
   });
 
   it('uses apm unpack when apm is available', async () => {
-    // apm --version succeeds
-    mockExec.mockImplementation(async (cmd: string, args?: string[]) => {
+    mockExec.mockImplementation(async (cmd, args?) => {
       if (cmd === 'apm' && args?.[0] === '--version') return 0;
       if (cmd === 'apm' && args?.[0] === 'unpack') return 0;
       return 1;
@@ -100,15 +104,14 @@ describe('extractBundle', () => {
     const result = await extractBundle(bundlePath, tmpDir);
     expect(result.verified).toBe(true);
 
-    // Verify apm unpack was called
     const unpackCall = mockExec.mock.calls.find(
-      c => c[0] === 'apm' && (c[1] as string[])?.[0] === 'unpack'
+      c => c[0] === 'apm' && c[1]?.[0] === 'unpack'
     );
     expect(unpackCall).toBeTruthy();
   });
 
   it('falls back to tar when apm is not available', async () => {
-    mockExec.mockImplementation(async (cmd: string, args?: string[]) => {
+    mockExec.mockImplementation(async (cmd, args?) => {
       if (cmd === 'apm' && args?.[0] === '--version') return 1;
       if (cmd === 'tar') return 0;
       return 1;
@@ -117,10 +120,9 @@ describe('extractBundle', () => {
     const result = await extractBundle(bundlePath, tmpDir);
     expect(result.verified).toBe(false);
 
-    // Verify tar was called
     const tarCall = mockExec.mock.calls.find(c => c[0] === 'tar');
     expect(tarCall).toBeTruthy();
-    expect((tarCall![1] as string[])).toContain('--strip-components=1');
+    expect(tarCall![1]).toContain('--strip-components=1');
   });
 
   it('throws when bundle file does not exist', async () => {
@@ -129,7 +131,7 @@ describe('extractBundle', () => {
   });
 
   it('throws when apm unpack fails', async () => {
-    mockExec.mockImplementation(async (cmd: string, args?: string[]) => {
+    mockExec.mockImplementation(async (cmd, args?) => {
       if (cmd === 'apm' && args?.[0] === '--version') return 0;
       if (cmd === 'apm' && args?.[0] === 'unpack') return 1;
       return 0;
@@ -154,19 +156,16 @@ describe('runPackStep', () => {
   });
 
   it('builds correct args with target and archive', async () => {
-    // Create a fake archive output
     fs.writeFileSync(path.join(buildDir, 'test-pkg-1.0.0.tar.gz'), 'fake');
-
     mockExec.mockResolvedValue(0);
 
     const result = await runPackStep(tmpDir, { target: 'vscode', archive: true });
 
-    // Verify apm pack was called with correct args
     const packCall = mockExec.mock.calls.find(
-      c => c[0] === 'apm' && (c[1] as string[])?.includes('pack')
+      c => c[0] === 'apm' && c[1]?.includes('pack')
     );
     expect(packCall).toBeTruthy();
-    const args = packCall![1] as string[];
+    const args = packCall![1]!;
     expect(args).toContain('--target');
     expect(args).toContain('vscode');
     expect(args).toContain('--archive');
@@ -174,18 +173,16 @@ describe('runPackStep', () => {
   });
 
   it('builds correct args without target', async () => {
-    // Create a fake directory output
     fs.mkdirSync(path.join(buildDir, 'test-pkg-1.0.0'), { recursive: true });
-
     mockExec.mockResolvedValue(0);
 
     const result = await runPackStep(tmpDir, { archive: false });
 
     const packCall = mockExec.mock.calls.find(
-      c => c[0] === 'apm' && (c[1] as string[])?.includes('pack')
+      c => c[0] === 'apm' && c[1]?.includes('pack')
     );
     expect(packCall).toBeTruthy();
-    const args = packCall![1] as string[];
+    const args = packCall![1]!;
     expect(args).not.toContain('--target');
     expect(args).not.toContain('--archive');
     expect(result).toContain('test-pkg-1.0.0');
@@ -194,7 +191,6 @@ describe('runPackStep', () => {
   it('throws when multiple archives found', async () => {
     fs.writeFileSync(path.join(buildDir, 'pkg-a-1.0.tar.gz'), 'fake');
     fs.writeFileSync(path.join(buildDir, 'pkg-b-2.0.tar.gz'), 'fake');
-
     mockExec.mockResolvedValue(0);
 
     await expect(runPackStep(tmpDir, { archive: true }))
@@ -204,7 +200,6 @@ describe('runPackStep', () => {
   it('throws when multiple bundle directories found', async () => {
     fs.mkdirSync(path.join(buildDir, 'pkg-a'), { recursive: true });
     fs.mkdirSync(path.join(buildDir, 'pkg-b'), { recursive: true });
-
     mockExec.mockResolvedValue(0);
 
     await expect(runPackStep(tmpDir, { archive: false }))
@@ -221,9 +216,6 @@ describe('runPackStep', () => {
 
 describe('mode detection', () => {
   it('rejects pack and bundle used together', async () => {
-    // This is tested via runner.ts integration, but we document the contract here.
-    // The runner checks: if (bundleInput && packInput) throw
-    // We verify the error message format:
     const errorMsg = "'pack' and 'bundle' inputs are mutually exclusive";
     expect(errorMsg).toContain('mutually exclusive');
   });

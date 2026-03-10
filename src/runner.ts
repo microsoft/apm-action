@@ -3,8 +3,8 @@ import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
-import { ensureApmInstalled } from './installer';
-import { resolveLocalBundle, extractBundle, runPackStep } from './bundler';
+import { ensureApmInstalled } from './installer.js';
+import { resolveLocalBundle, extractBundle, runPackStep } from './bundler.js';
 
 /**
  * Run the APM action: install agent primitives.
