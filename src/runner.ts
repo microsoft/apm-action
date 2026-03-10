@@ -3,7 +3,8 @@ import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
-import { ensureApmInstalled } from './installer';
+import { ensureApmInstalled } from './installer.js';
+import { resolveLocalBundle, extractBundle, runPackStep } from './bundler.js';
 
 /**
  * Run the APM action: install agent primitives.
@@ -13,18 +14,43 @@ import { ensureApmInstalled } from './installer';
  * With `isolated: true`: clears existing primitives, ignores apm.yml, installs only inline deps.
  * With `compile: true`: runs apm compile after install to generate AGENTS.md.
  * With `script` input: runs an apm script after install.
+ * With `pack: true`: runs apm pack after install to produce a bundle.
+ * With `bundle` input: restores from a bundle (no APM install needed).
  */
 export async function run(): Promise<void> {
   try {
-    // 1. Install APM CLI
-    await ensureApmInstalled();
-
-    // 2. Resolve working directory
+    // 0. Resolve working directory (needed by all modes)
     const workingDir = core.getInput('working-directory') || '.';
     const resolvedDir = path.resolve(workingDir);
     core.info(`Working directory: ${resolvedDir}`);
 
-    // 3. Parse inputs
+    // 0b. Read mode inputs
+    const bundleInput = core.getInput('bundle').trim();
+    const packInput = core.getInput('pack') === 'true';
+
+    if (bundleInput && packInput) {
+      throw new Error("'pack' and 'bundle' inputs are mutually exclusive");
+    }
+
+    // RESTORE MODE: extract bundle, skip APM installation entirely
+    if (bundleInput) {
+      const bundlePath = await resolveLocalBundle(bundleInput, resolvedDir);
+      core.info(`Restoring bundle: ${bundlePath}`);
+      const result = await extractBundle(bundlePath, resolvedDir);
+      const verifiedMsg = result.verified ? ' (verified)' : ' (unverified — install APM for integrity checks)';
+      core.info(`Restored ${result.files} file(s)${verifiedMsg}`);
+
+      const primitivesPath = path.join(resolvedDir, '.github');
+      core.setOutput('primitives-path', primitivesPath);
+      core.setOutput('success', 'true');
+      core.info('APM action completed successfully (restore mode)');
+      return;
+    }
+
+    // 1. Install APM CLI (install + pack modes)
+    await ensureApmInstalled();
+
+    // 2. Parse inputs
     const depsInput = core.getInput('dependencies').trim();
     const isolated = core.getInput('isolated') === 'true';
 
@@ -72,6 +98,14 @@ export async function run(): Promise<void> {
     if (script) {
       core.info(`Running APM script: ${script}`);
       await runApm(['run', script], resolvedDir);
+    }
+
+    // 8. Pack mode: produce bundle after install
+    if (packInput) {
+      const target = core.getInput('target').trim() || undefined;
+      const archive = core.getInput('archive') !== 'false';
+      const bundlePath = await runPackStep(resolvedDir, { target, archive });
+      core.setOutput('bundle-path', bundlePath);
     }
 
     core.setOutput('success', 'true');

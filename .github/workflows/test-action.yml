@@ -5,6 +5,9 @@ on:
   push:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   test-inline-deps:
     name: Install with inline dependencies (additive)
