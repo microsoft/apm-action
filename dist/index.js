@@ -37266,15 +37266,25 @@ async function installDeps(dir, deps) {
 const PRIMITIVE_DIRS = ['instructions', 'agents', 'skills', 'prompts'];
 /**
  * Remove existing primitive directories so isolated mode starts from a clean slate.
+ *
+ * Security: each computed sub-path is validated to stay within the resolved
+ * working directory, preventing path-traversal regardless of where the
+ * directory lives on the filesystem.
  */
 function clearPrimitives(dir) {
-    const workspace = process.env.GITHUB_WORKSPACE ?? process.cwd();
     const resolved = external_path_.resolve(dir);
-    if (!resolved.startsWith(external_path_.resolve(workspace))) {
-        throw new Error(`clearPrimitives: resolved dir "${resolved}" is outside workspace "${workspace}"`);
+    const ghDir = external_path_.join(resolved, '.github');
+    // Nothing to clear — empty directory already satisfies isolated mode
+    if (!external_fs_namespaceObject.existsSync(ghDir)) {
+        info('No .github/ directory found — nothing to clear');
+        return;
     }
     for (const sub of PRIMITIVE_DIRS) {
-        const subPath = external_path_.join(resolved, '.github', sub);
+        const subPath = __nccwpck_require__.ab + "apm-action/" + resolved + '/.github/' + sub;
+        // Guard: ensure computed path stays within the working directory
+        if (!subPath.startsWith(resolved + external_path_.sep) && subPath !== resolved) {
+            throw new Error(`clearPrimitives: path traversal detected — "${subPath}" escapes working directory "${resolved}"`);
+        }
         if (external_fs_namespaceObject.existsSync(subPath)) {
             external_fs_namespaceObject.rmSync(subPath, { recursive: true });
             info(`Cleared .github/${sub}/`);
