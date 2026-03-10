@@ -39,7 +39,7 @@ Install dependencies and pack them into a self-contained `.tar.gz` archive. Comb
   id: pack
   with:
     pack: 'true'
-    target: 'vscode'
+    target: 'copilot'
 
 - uses: actions/upload-artifact@v4
   with:
@@ -75,7 +75,7 @@ jobs:
         id: pack
         with:
           pack: 'true'
-          target: 'vscode'
+          target: 'copilot'
       - uses: actions/upload-artifact@v4
         with:
           name: agent-bundle
@@ -120,7 +120,7 @@ jobs:
 | `compile` | No | `false` | Run `apm compile` after install to generate AGENTS.md |
 | `pack` | No | `false` | Pack a bundle after install (produces `.tar.gz` by default) |
 | `bundle` | No | | Restore from a bundle (local path or glob). Skips APM installation entirely. |
-| `target` | No | | Bundle target: `vscode`, `claude`, or `all` (used with `pack: true`) |
+| `target` | No | | Bundle target: `copilot`, `vscode`, `claude`, or `all` (used with `pack: true`) |
 | `archive` | No | `true` | Produce `.tar.gz` instead of directory (used with `pack: true`) |
 
 ## Outputs

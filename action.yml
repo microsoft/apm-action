@@ -39,7 +39,7 @@ inputs:
     required: false
     default: ''
   target:
-    description: 'Bundle target: vscode, claude, or all (used with pack: true)'
+    description: 'Bundle target: copilot, vscode, claude, or all (used with pack: true)'
     required: false
     default: ''
   archive:
