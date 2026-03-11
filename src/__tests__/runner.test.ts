@@ -4,16 +4,35 @@ import os from 'node:os';
 import path from 'node:path';
 
 const mockInfo = jest.fn();
+const mockGetInput = jest.fn();
+const mockSetOutput = jest.fn();
+const mockSetFailed = jest.fn();
 
 jest.unstable_mockModule('@actions/core', () => ({
   info: mockInfo,
   warning: jest.fn(),
-  getInput: jest.fn(),
-  setOutput: jest.fn(),
-  setFailed: jest.fn(),
+  getInput: mockGetInput,
+  setOutput: mockSetOutput,
+  setFailed: mockSetFailed,
 }));
 
-const { clearPrimitives } = await import('../runner.js');
+const mockExec = jest.fn<() => Promise<number>>();
+jest.unstable_mockModule('@actions/exec', () => ({
+  exec: mockExec,
+}));
+
+const mockEnsureApmInstalled = jest.fn<() => Promise<void>>();
+jest.unstable_mockModule('../installer.js', () => ({
+  ensureApmInstalled: mockEnsureApmInstalled,
+}));
+
+jest.unstable_mockModule('../bundler.js', () => ({
+  resolveLocalBundle: jest.fn(),
+  extractBundle: jest.fn(),
+  runPackStep: jest.fn(),
+}));
+
+const { clearPrimitives, run } = await import('../runner.js');
 
 describe('clearPrimitives', () => {
   let tmpDir: string;
@@ -110,5 +129,47 @@ describe('clearPrimitives', () => {
       (c) => typeof c[0] === 'string' && (c[0] as string).startsWith('Cleared'),
     );
     expect(clearedCalls).toHaveLength(0);
+  });
+});
+
+describe('run', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-action-run-'));
+    mockEnsureApmInstalled.mockResolvedValue(undefined);
+    mockExec.mockResolvedValue(0);
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('creates working directory when it does not exist (isolated mode)', async () => {
+    const nonExistentDir = path.join(tmpDir, 'nested', 'workdir');
+    expect(fs.existsSync(nonExistentDir)).toBe(false);
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockGetInput.mockImplementation(((name: string) => {
+      switch (name) {
+        case 'working-directory': return nonExistentDir;
+        case 'dependencies': return 'microsoft/some-package';
+        case 'isolated': return 'true';
+        case 'bundle': return '';
+        case 'pack': return 'false';
+        case 'compile': return 'false';
+        case 'script': return '';
+        default: return '';
+      }
+    }) as any);
+
+    await run();
+
+    // Directory was created
+    expect(fs.existsSync(nonExistentDir)).toBe(true);
+    // apm.yml was generated inside it
+    expect(fs.existsSync(path.join(nonExistentDir, 'apm.yml'))).toBe(true);
+    expect(mockSetFailed).not.toHaveBeenCalled();
   });
 });

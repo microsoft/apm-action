@@ -37128,6 +37128,7 @@ async function run() {
         // 0. Resolve working directory (needed by all modes)
         const workingDir = getInput('working-directory') || '.';
         const resolvedDir = external_path_.resolve(workingDir);
+        external_fs_namespaceObject.mkdirSync(resolvedDir, { recursive: true });
         info(`Working directory: ${resolvedDir}`);
         // 0b. Read mode inputs
         const bundleInput = getInput('bundle').trim();

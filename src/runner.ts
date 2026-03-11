@@ -22,6 +22,7 @@ export async function run(): Promise<void> {
     // 0. Resolve working directory (needed by all modes)
     const workingDir = core.getInput('working-directory') || '.';
     const resolvedDir = path.resolve(workingDir);
+    fs.mkdirSync(resolvedDir, { recursive: true });
     core.info(`Working directory: ${resolvedDir}`);
 
     // 0b. Read mode inputs
