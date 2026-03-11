@@ -150,8 +150,7 @@ describe('run', () => {
     const nonExistentDir = path.join(tmpDir, 'nested', 'workdir');
     expect(fs.existsSync(nonExistentDir)).toBe(false);
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockGetInput.mockImplementation(((name: string) => {
+    mockGetInput.mockImplementation((name: unknown) => {
       switch (name) {
         case 'working-directory': return nonExistentDir;
         case 'dependencies': return 'microsoft/some-package';
@@ -162,7 +161,7 @@ describe('run', () => {
         case 'script': return '';
         default: return '';
       }
-    }) as any);
+    });
 
     await run();
 
