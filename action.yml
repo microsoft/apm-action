@@ -46,6 +46,10 @@ inputs:
     description: 'Produce .tar.gz instead of directory (used with pack: true)'
     required: false
     default: 'true'
+  github-token:
+    description: 'GitHub token for API calls (avoids rate limits). Defaults to the automatic GITHUB_TOKEN.'
+    required: false
+    default: '${{ github.token }}'
 
 outputs:
   success:

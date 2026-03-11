@@ -1,0 +1,84 @@
+name: 'Test: Version Pinning'
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'src/installer.ts'
+      - '.github/workflows/test-version-pin.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test-pinned-version-ubuntu:
+    name: Pinned version (Ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run apm-action with pinned version 0.7.5
+        uses: ./
+        with:
+          apm-version: '0.7.5'
+          dependencies: |
+            - microsoft/apm-sample-package
+
+      - name: Verify pinned version installed
+        run: |
+          VERSION=$(apm --version 2>&1)
+          echo "Installed APM version: $VERSION"
+          if echo "$VERSION" | grep -q "0.7.5"; then
+            echo "SUCCESS: Correct version 0.7.5 installed"
+          else
+            echo "FAIL: Expected version 0.7.5, got: $VERSION"
+            exit 1
+          fi
+
+  test-pinned-version-ubuntu-arm:
+    name: Pinned version (Ubuntu ARM64)
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run apm-action with pinned version 0.7.5
+        uses: ./
+        with:
+          apm-version: '0.7.5'
+          dependencies: |
+            - microsoft/apm-sample-package
+
+      - name: Verify pinned version installed
+        run: |
+          VERSION=$(apm --version 2>&1)
+          echo "Installed APM version: $VERSION"
+          if echo "$VERSION" | grep -q "0.7.5"; then
+            echo "SUCCESS: Correct version 0.7.5 installed on ARM64"
+          else
+            echo "FAIL: Expected version 0.7.5, got: $VERSION"
+            exit 1
+          fi
+
+  test-latest-version:
+    name: Latest version (Ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run apm-action with latest
+        uses: ./
+        with:
+          apm-version: 'latest'
+          dependencies: |
+            - microsoft/apm-sample-package
+
+      - name: Verify latest version installed
+        run: |
+          VERSION=$(apm --version 2>&1)
+          echo "Installed APM version: $VERSION"
+          if [ -n "$VERSION" ]; then
+            echo "SUCCESS: APM latest installed — version: $VERSION"
+          else
+            echo "FAIL: APM not found or version empty"
+            exit 1
+          fi
