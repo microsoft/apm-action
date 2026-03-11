@@ -112,7 +112,7 @@ jobs:
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `working-directory` | No | `.` | Working directory for execution |
+| `working-directory` | No | `.` | Working directory for execution. Must exist in non-isolated mode (with your `apm.yml`). In `isolated`, `pack`, or `bundle` modes the directory is created automatically. |
 | `apm-version` | No | `latest` | APM version to install |
 | `script` | No | | APM script to run after install |
 | `dependencies` | No | | YAML array of extra dependencies to install (additive to apm.yml) |

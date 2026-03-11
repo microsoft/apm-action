@@ -33,10 +33,14 @@ export async function resolveLocalBundle(pattern: string, workspaceDir: string):
 
   const resolvedBundle = path.resolve(matches[0]);
 
-  // Path traversal protection: ensure resolved path is within workspace
-  const relative = path.relative(resolvedWorkspace, resolvedBundle);
-  if (relative.startsWith('..') || path.isAbsolute(relative)) {
-    throw new Error(`Bundle path "${pattern}" resolves outside the workspace`);
+  // Path traversal protection for relative patterns: ensure resolved path stays
+  // within the workspace. Absolute patterns are user-explicit and not checked —
+  // the user intentionally specified a location (e.g. /tmp/gh-aw/apm-bundle/).
+  if (!path.isAbsolute(pattern)) {
+    const relative = path.relative(resolvedWorkspace, resolvedBundle);
+    if (relative.startsWith('..') || path.isAbsolute(relative)) {
+      throw new Error(`Bundle path "${pattern}" resolves outside the workspace`);
+    }
   }
 
   return resolvedBundle;

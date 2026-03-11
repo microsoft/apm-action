@@ -36968,10 +36968,14 @@ async function resolveLocalBundle(pattern, workspaceDir) {
         throw new Error(`Multiple bundles match '${pattern}': ${list}. Use an exact path.`);
     }
     const resolvedBundle = external_path_.resolve(matches[0]);
-    // Path traversal protection: ensure resolved path is within workspace
-    const relative = external_path_.relative(resolvedWorkspace, resolvedBundle);
-    if (relative.startsWith('..') || external_path_.isAbsolute(relative)) {
-        throw new Error(`Bundle path "${pattern}" resolves outside the workspace`);
+    // Path traversal protection for relative patterns: ensure resolved path stays
+    // within the workspace. Absolute patterns are user-explicit and not checked —
+    // the user intentionally specified a location (e.g. /tmp/gh-aw/apm-bundle/).
+    if (!external_path_.isAbsolute(pattern)) {
+        const relative = external_path_.relative(resolvedWorkspace, resolvedBundle);
+        if (relative.startsWith('..') || external_path_.isAbsolute(relative)) {
+            throw new Error(`Bundle path "${pattern}" resolves outside the workspace`);
+        }
     }
     return resolvedBundle;
 }
@@ -37125,17 +37129,35 @@ function countFilesRecursive(dir) {
  */
 async function run() {
     try {
-        // 0. Resolve working directory (needed by all modes)
+        // 0. Resolve working directory and read mode flags
         const workingDir = getInput('working-directory') || '.';
         const resolvedDir = external_path_.resolve(workingDir);
-        info(`Working directory: ${resolvedDir}`);
-        // 0b. Read mode inputs
         const bundleInput = getInput('bundle').trim();
         const packInput = getInput('pack') === 'true';
+        const isolated = getInput('isolated') === 'true';
+        // Validate inputs before touching the filesystem.
         if (bundleInput && packInput) {
             throw new Error("'pack' and 'bundle' inputs are mutually exclusive");
         }
-        // RESTORE MODE: extract bundle, skip APM installation entirely
+        // Directory creation contract:
+        //   - isolated / pack / bundle (restore) modes: the action owns the workspace
+        //     lifecycle and creates the directory automatically. These modes bootstrap
+        //     everything from scratch — there is no pre-existing project to find.
+        //   - non-isolated mode: the caller owns the project directory (which must
+        //     contain apm.yml). If it doesn't exist, we fail fast with a clear message
+        //     rather than silently creating an empty directory that would just fail later.
+        const actionOwnsDir = isolated || packInput || !!bundleInput;
+        if (actionOwnsDir) {
+            external_fs_namespaceObject.mkdirSync(resolvedDir, { recursive: true });
+        }
+        else if (!external_fs_namespaceObject.existsSync(resolvedDir)) {
+            throw new Error(`Working directory does not exist: ${resolvedDir}. ` +
+                'In non-isolated mode the directory must already contain your project (with apm.yml). ' +
+                'Use isolated: true if you want the action to create it automatically.');
+        }
+        info(`Working directory: ${resolvedDir}`);
+        // RESTORE MODE: extract bundle, skip APM installation entirely.
+        // Directory was already created above (actionOwnsDir = true for bundle mode).
         if (bundleInput) {
             const bundlePath = await resolveLocalBundle(bundleInput, resolvedDir);
             info(`Restoring bundle: ${bundlePath}`);
@@ -37152,8 +37174,8 @@ async function run() {
         await ensureApmInstalled();
         // 2. Parse inputs
         const depsInput = getInput('dependencies').trim();
-        const isolated = getInput('isolated') === 'true';
-        // 4. Handle isolated mode: clear existing primitives, generate apm.yml from inline deps only
+        // 3. Handle isolated mode: clear existing primitives, generate apm.yml from inline deps only.
+        //    Directory was already created above (actionOwnsDir = true for isolated mode).
         if (isolated) {
             if (!depsInput) {
                 throw new Error('isolated mode requires dependencies input');

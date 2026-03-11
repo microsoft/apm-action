@@ -78,6 +78,24 @@ describe('resolveLocalBundle', () => {
     await expect(resolveLocalBundle('../outside/evil.tar.gz', workspace))
       .rejects.toThrow('resolves outside the workspace');
   });
+
+  it('allows absolute bundle paths outside workspace', async () => {
+    // gh-aw uses: bundle: /tmp/gh-aw/apm-bundle/*.tar.gz
+    // The bundle is downloaded by actions/download-artifact to /tmp/, which is
+    // outside GITHUB_WORKSPACE. Absolute paths are user-explicit and should not
+    // be rejected by the traversal check.
+    const workspace = '/home/runner/work/gh-aw/gh-aw';
+    const match = '/tmp/gh-aw/apm-bundle/claude.tar.gz';
+
+    mockGlobCreate.mockResolvedValue({
+      glob: jest.fn<() => Promise<string[]>>().mockResolvedValue([match]),
+      getSearchPaths: jest.fn<() => string[]>().mockReturnValue([]),
+      globGenerator: jest.fn(),
+    });
+
+    const result = await resolveLocalBundle('/tmp/gh-aw/apm-bundle/*.tar.gz', workspace);
+    expect(result).toBe(match);
+  });
 });
 
 describe('extractBundle', () => {

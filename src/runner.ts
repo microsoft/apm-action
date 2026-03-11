@@ -19,20 +19,39 @@ import { resolveLocalBundle, extractBundle, runPackStep } from './bundler.js';
  */
 export async function run(): Promise<void> {
   try {
-    // 0. Resolve working directory (needed by all modes)
+    // 0. Resolve working directory and read mode flags
     const workingDir = core.getInput('working-directory') || '.';
     const resolvedDir = path.resolve(workingDir);
-    core.info(`Working directory: ${resolvedDir}`);
-
-    // 0b. Read mode inputs
     const bundleInput = core.getInput('bundle').trim();
     const packInput = core.getInput('pack') === 'true';
+    const isolated = core.getInput('isolated') === 'true';
 
+    // Validate inputs before touching the filesystem.
     if (bundleInput && packInput) {
       throw new Error("'pack' and 'bundle' inputs are mutually exclusive");
     }
 
-    // RESTORE MODE: extract bundle, skip APM installation entirely
+    // Directory creation contract:
+    //   - isolated / pack / bundle (restore) modes: the action owns the workspace
+    //     lifecycle and creates the directory automatically. These modes bootstrap
+    //     everything from scratch — there is no pre-existing project to find.
+    //   - non-isolated mode: the caller owns the project directory (which must
+    //     contain apm.yml). If it doesn't exist, we fail fast with a clear message
+    //     rather than silently creating an empty directory that would just fail later.
+    const actionOwnsDir = isolated || packInput || !!bundleInput;
+    if (actionOwnsDir) {
+      fs.mkdirSync(resolvedDir, { recursive: true });
+    } else if (!fs.existsSync(resolvedDir)) {
+      throw new Error(
+        `Working directory does not exist: ${resolvedDir}. ` +
+        'In non-isolated mode the directory must already contain your project (with apm.yml). ' +
+        'Use isolated: true if you want the action to create it automatically.',
+      );
+    }
+    core.info(`Working directory: ${resolvedDir}`);
+
+    // RESTORE MODE: extract bundle, skip APM installation entirely.
+    // Directory was already created above (actionOwnsDir = true for bundle mode).
     if (bundleInput) {
       const bundlePath = await resolveLocalBundle(bundleInput, resolvedDir);
       core.info(`Restoring bundle: ${bundlePath}`);
@@ -52,9 +71,9 @@ export async function run(): Promise<void> {
 
     // 2. Parse inputs
     const depsInput = core.getInput('dependencies').trim();
-    const isolated = core.getInput('isolated') === 'true';
 
-    // 4. Handle isolated mode: clear existing primitives, generate apm.yml from inline deps only
+    // 3. Handle isolated mode: clear existing primitives, generate apm.yml from inline deps only.
+    //    Directory was already created above (actionOwnsDir = true for isolated mode).
     if (isolated) {
       if (!depsInput) {
         throw new Error('isolated mode requires dependencies input');
