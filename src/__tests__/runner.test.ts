@@ -171,4 +171,29 @@ describe('run', () => {
     expect(fs.existsSync(path.join(nonExistentDir, 'apm.yml'))).toBe(true);
     expect(mockSetFailed).not.toHaveBeenCalled();
   });
+
+  it('fails fast when working directory does not exist in default mode', async () => {
+    const nonExistentDir = path.join(tmpDir, 'does-not-exist');
+
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return nonExistentDir;
+        case 'dependencies': return '';
+        case 'isolated': return 'false';
+        case 'bundle': return '';
+        case 'pack': return 'false';
+        case 'compile': return 'false';
+        case 'script': return '';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('Working directory does not exist'),
+    );
+    // Directory should NOT have been created
+    expect(fs.existsSync(nonExistentDir)).toBe(false);
+  });
 });
