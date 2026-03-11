@@ -36968,10 +36968,14 @@ async function resolveLocalBundle(pattern, workspaceDir) {
         throw new Error(`Multiple bundles match '${pattern}': ${list}. Use an exact path.`);
     }
     const resolvedBundle = external_path_.resolve(matches[0]);
-    // Path traversal protection: ensure resolved path is within workspace
-    const relative = external_path_.relative(resolvedWorkspace, resolvedBundle);
-    if (relative.startsWith('..') || external_path_.isAbsolute(relative)) {
-        throw new Error(`Bundle path "${pattern}" resolves outside the workspace`);
+    // Path traversal protection for relative patterns: ensure resolved path stays
+    // within the workspace. Absolute patterns are user-explicit and not checked —
+    // the user intentionally specified a location (e.g. /tmp/gh-aw/apm-bundle/).
+    if (!external_path_.isAbsolute(pattern)) {
+        const relative = external_path_.relative(resolvedWorkspace, resolvedBundle);
+        if (relative.startsWith('..') || external_path_.isAbsolute(relative)) {
+            throw new Error(`Bundle path "${pattern}" resolves outside the workspace`);
+        }
     }
     return resolvedBundle;
 }
