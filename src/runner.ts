@@ -30,16 +30,16 @@ export async function run(): Promise<void> {
     //   - isolated / pack / bundle (restore) modes: the action owns the workspace
     //     lifecycle and creates the directory automatically. These modes bootstrap
     //     everything from scratch — there is no pre-existing project to find.
-    //   - default mode: the caller owns the project directory (which must contain
-    //     apm.yml). If it doesn't exist, we fail fast with a clear message rather
-    //     than silently creating an empty directory that would just fail later.
+    //   - non-isolated mode: the caller owns the project directory (which must
+    //     contain apm.yml). If it doesn't exist, we fail fast with a clear message
+    //     rather than silently creating an empty directory that would just fail later.
     const actionOwnsDir = isolated || packInput || !!bundleInput;
     if (actionOwnsDir) {
       fs.mkdirSync(resolvedDir, { recursive: true });
     } else if (!fs.existsSync(resolvedDir)) {
       throw new Error(
         `Working directory does not exist: ${resolvedDir}. ` +
-        'In default mode the directory must already contain your project (with apm.yml). ' +
+        'In non-isolated mode the directory must already contain your project (with apm.yml). ' +
         'Use isolated: true if you want the action to create it automatically.',
       );
     }

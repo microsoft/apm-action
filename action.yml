@@ -7,7 +7,7 @@ branding:
 
 inputs:
   working-directory:
-    description: 'Working directory for execution. In default mode, this directory must exist and contain your apm.yml. In isolated, pack, or bundle modes the action creates it automatically.'
+    description: 'Working directory for execution. In non-isolated mode, this directory must exist and contain your apm.yml. In isolated, pack, or bundle modes the action creates it automatically.'
     required: false
     default: '.'
   apm-version:

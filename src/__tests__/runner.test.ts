@@ -172,7 +172,7 @@ describe('run', () => {
     expect(mockSetFailed).not.toHaveBeenCalled();
   });
 
-  it('fails fast when working directory does not exist in default mode', async () => {
+  it('fails fast when working directory does not exist in non-isolated mode', async () => {
     const nonExistentDir = path.join(tmpDir, 'does-not-exist');
 
     mockGetInput.mockImplementation((name: unknown) => {
