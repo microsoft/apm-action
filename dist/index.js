@@ -37135,6 +37135,10 @@ async function run() {
         const bundleInput = getInput('bundle').trim();
         const packInput = getInput('pack') === 'true';
         const isolated = getInput('isolated') === 'true';
+        // Validate inputs before touching the filesystem.
+        if (bundleInput && packInput) {
+            throw new Error("'pack' and 'bundle' inputs are mutually exclusive");
+        }
         // Directory creation contract:
         //   - isolated / pack / bundle (restore) modes: the action owns the workspace
         //     lifecycle and creates the directory automatically. These modes bootstrap
@@ -37152,9 +37156,6 @@ async function run() {
                 'Use isolated: true if you want the action to create it automatically.');
         }
         info(`Working directory: ${resolvedDir}`);
-        if (bundleInput && packInput) {
-            throw new Error("'pack' and 'bundle' inputs are mutually exclusive");
-        }
         // RESTORE MODE: extract bundle, skip APM installation entirely.
         // Directory was already created above (actionOwnsDir = true for bundle mode).
         if (bundleInput) {
