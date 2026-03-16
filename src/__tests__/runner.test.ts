@@ -4,13 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 
 const mockInfo = jest.fn();
+const mockWarning = jest.fn();
 const mockGetInput = jest.fn();
 const mockSetOutput = jest.fn();
 const mockSetFailed = jest.fn();
 
 jest.unstable_mockModule('@actions/core', () => ({
   info: mockInfo,
-  warning: jest.fn(),
+  warning: mockWarning,
   getInput: mockGetInput,
   setOutput: mockSetOutput,
   setFailed: mockSetFailed,
@@ -195,5 +196,160 @@ describe('run', () => {
     );
     // Directory should NOT have been created
     expect(fs.existsSync(nonExistentDir)).toBe(false);
+  });
+
+  it('resolves audit-report "true" to default sarif path', async () => {
+    // Create apm.yml so install path works
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: test\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+
+    // Simulate: apm install succeeds, apm --version succeeds, apm audit succeeds and creates file
+    (mockExec as jest.Mock).mockImplementation(async (...fnArgs: unknown[]) => {
+      const _cmd = fnArgs[0] as string;
+      const args = fnArgs[1] as string[] | undefined;
+      if (_cmd === 'apm' && args?.[0] === 'audit') {
+        // Simulate apm audit creating the SARIF file
+        const outputIdx = args.indexOf('-o');
+        if (outputIdx >= 0 && args[outputIdx + 1]) {
+          fs.writeFileSync(args[outputIdx + 1], '{}');
+        }
+        return 0;
+      }
+      return 0;
+    });
+
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'dependencies': return '';
+        case 'isolated': return 'false';
+        case 'bundle': return '';
+        case 'pack': return 'false';
+        case 'compile': return 'false';
+        case 'script': return '';
+        case 'audit-report': return 'true';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    const expectedPath = path.join(tmpDir, 'apm-audit.sarif');
+    expect(mockSetOutput).toHaveBeenCalledWith('audit-report-path', expectedPath);
+    expect(mockInfo).toHaveBeenCalledWith(expect.stringContaining('Audit report generated'));
+  });
+
+  it('resolves audit-report custom path', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: test\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+
+    (mockExec as jest.Mock).mockImplementation(async (...fnArgs: unknown[]) => {
+      const _cmd = fnArgs[0] as string;
+      const args = fnArgs[1] as string[] | undefined;
+      if (_cmd === 'apm' && args?.[0] === 'audit') {
+        const outputIdx = args.indexOf('-o');
+        if (outputIdx >= 0 && args[outputIdx + 1]) {
+          const reportFile = args[outputIdx + 1];
+          fs.mkdirSync(path.dirname(reportFile), { recursive: true });
+          fs.writeFileSync(reportFile, '{}');
+        }
+        return 0;
+      }
+      return 0;
+    });
+
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'dependencies': return '';
+        case 'isolated': return 'false';
+        case 'bundle': return '';
+        case 'pack': return 'false';
+        case 'compile': return 'false';
+        case 'script': return '';
+        case 'audit-report': return 'reports/my-audit.sarif';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    const expectedPath = path.resolve(tmpDir, 'reports/my-audit.sarif');
+    // Verify audit was called with the custom path
+    const auditCall = (mockExec as jest.Mock).mock.calls.find(
+      (c: unknown[]) => c[0] === 'apm' && (c[1] as string[])?.[0] === 'audit',
+    );
+    expect(auditCall).toBeTruthy();
+    expect((auditCall![1] as string[])).toContain(expectedPath);
+  });
+
+  it('emits warning when audit finds critical findings (exit code 1)', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: test\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+
+    (mockExec as jest.Mock).mockImplementation(async (...fnArgs: unknown[]) => {
+      const _cmd = fnArgs[0] as string;
+      const args = fnArgs[1] as string[] | undefined;
+      if (_cmd === 'apm' && args?.[0] === 'audit') {
+        const outputIdx = args.indexOf('-o');
+        if (outputIdx >= 0 && args[outputIdx + 1]) {
+          fs.writeFileSync(args[outputIdx + 1], '{}');
+        }
+        return 1; // critical findings
+      }
+      return 0;
+    });
+
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'dependencies': return '';
+        case 'isolated': return 'false';
+        case 'bundle': return '';
+        case 'pack': return 'false';
+        case 'compile': return 'false';
+        case 'script': return '';
+        case 'audit-report': return 'true';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled(); // audit does NOT fail the action
+    expect(mockWarning).toHaveBeenCalledWith(
+      expect.stringContaining('critical hidden-character findings'),
+    );
+  });
+
+  it('does not run audit when audit-report is empty', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: test\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+    mockExec.mockResolvedValue(0);
+
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'dependencies': return '';
+        case 'isolated': return 'false';
+        case 'bundle': return '';
+        case 'pack': return 'false';
+        case 'compile': return 'false';
+        case 'script': return '';
+        case 'audit-report': return '';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    const auditCall = (mockExec as jest.Mock).mock.calls.find(
+      (c: unknown[]) => c[0] === 'apm' && (c[1] as string[])?.[0] === 'audit',
+    );
+    expect(auditCall).toBeUndefined();
+    expect(mockSetOutput).not.toHaveBeenCalledWith('audit-report-path', expect.anything());
   });
 });

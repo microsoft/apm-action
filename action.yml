@@ -50,6 +50,10 @@ inputs:
     description: 'GitHub token for API calls (avoids rate limits). Defaults to the automatic GITHUB_TOKEN.'
     required: false
     default: '${{ github.token }}'
+  audit-report:
+    description: 'Generate a SARIF audit report during install/unpack. Set to "true" for default path (apm-audit.sarif), or provide a custom file path.'
+    required: false
+    default: ''
 
 outputs:
   success:
@@ -58,6 +62,8 @@ outputs:
     description: 'Path where agent primitives were deployed (.github)'
   bundle-path:
     description: 'Path to the packed bundle (only set in pack mode)'
+  audit-report-path:
+    description: 'Path to the generated SARIF audit report, if audit-report was enabled'
 
 runs:
   using: 'node24'

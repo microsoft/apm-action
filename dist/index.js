@@ -34718,7 +34718,7 @@ function error(message, properties = {}) {
  * @param properties optional properties to add to the annotation.
  */
 function warning(message, properties = {}) {
-    issueCommand('warning', toCommandProperties(properties), message instanceof Error ? message.toString() : message);
+    command_issueCommand('warning', utils_toCommandProperties(properties), message instanceof Error ? message.toString() : message);
 }
 /**
  * Adds a notice issue
@@ -41180,6 +41180,7 @@ async function run() {
         const bundleInput = getInput('bundle').trim();
         const packInput = getInput('pack') === 'true';
         const isolated = getInput('isolated') === 'true';
+        const auditReportInput = getInput('audit-report').trim();
         // Validate inputs before touching the filesystem.
         if (bundleInput && packInput) {
             throw new Error("'pack' and 'bundle' inputs are mutually exclusive");
@@ -41201,6 +41202,16 @@ async function run() {
                 'Use isolated: true if you want the action to create it automatically.');
         }
         info(`Working directory: ${resolvedDir}`);
+        // Resolve audit report path
+        let auditReportPath;
+        if (auditReportInput) {
+            if (auditReportInput === 'true') {
+                auditReportPath = external_path_.join(resolvedDir, 'apm-audit.sarif');
+            }
+            else {
+                auditReportPath = external_path_.resolve(resolvedDir, auditReportInput);
+            }
+        }
         // RESTORE MODE: extract bundle, skip APM installation entirely.
         // Directory was already created above (actionOwnsDir = true for bundle mode).
         if (bundleInput) {
@@ -41211,6 +41222,10 @@ async function run() {
             info(`Restored ${result.files} file(s)${verifiedMsg}`);
             const primitivesPath = external_path_.join(resolvedDir, '.github');
             setOutput('primitives-path', primitivesPath);
+            // Run audit on unpacked bundle if report requested
+            if (auditReportPath) {
+                await runAuditReport(resolvedDir, auditReportPath);
+            }
             setOutput('success', 'true');
             info('APM action completed successfully (restore mode)');
             return;
@@ -41243,6 +41258,10 @@ async function run() {
                 await installDeps(resolvedDir, deps);
             }
         }
+        // Run content audit if report requested
+        if (auditReportPath) {
+            await runAuditReport(resolvedDir, auditReportPath);
+        }
         // 5. Run apm compile (opt-in)
         const compile = getInput('compile') === 'true';
         if (compile) {
@@ -41274,6 +41293,40 @@ async function run() {
         const msg = error instanceof Error ? error.message : String(error);
         setOutput('success', 'false');
         setFailed(`APM action failed: ${msg}`);
+    }
+}
+/**
+ * Run `apm audit` to generate a SARIF report.
+ * Non-zero exit codes are informational (1=critical, 2=warning) and do not fail the action.
+ */
+async function runAuditReport(cwd, reportPath) {
+    // Check if apm is available (may not be in restore mode)
+    const apmAvailable = await exec_exec('apm', ['--version'], {
+        ignoreReturnCode: true,
+        silent: true,
+    }).catch(() => 1) === 0;
+    if (!apmAvailable) {
+        warning('APM not installed — cannot generate audit report. '
+            + 'Install APM for hidden-character audit coverage.');
+        return;
+    }
+    info('Running content audit...');
+    const auditRc = await exec_exec('apm', [
+        'audit', '-f', 'sarif', '-o', reportPath,
+    ], {
+        cwd,
+        ignoreReturnCode: true,
+        env: { ...process.env },
+    });
+    if (external_fs_namespaceObject.existsSync(reportPath)) {
+        setOutput('audit-report-path', reportPath);
+        info(`Audit report generated: ${reportPath}`);
+    }
+    if (auditRc === 1) {
+        warning('APM audit found critical hidden-character findings — see SARIF report for details');
+    }
+    else if (auditRc === 2) {
+        info('APM audit found warnings (non-critical) — see SARIF report for details');
     }
 }
 /**
