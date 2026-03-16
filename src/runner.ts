@@ -196,6 +196,28 @@ async function runAuditReport(cwd: string, reportPath: string): Promise<void> {
   } else if (auditRc === 2) {
     core.info('APM audit found warnings (non-critical) — see SARIF report for details');
   }
+
+  // Write markdown summary to $GITHUB_STEP_SUMMARY
+  try {
+    const mdResult = await exec.getExecOutput('apm', [
+      'audit', '-f', 'markdown',
+    ], {
+      cwd,
+      ignoreReturnCode: true,
+      silent: true,
+    });
+
+    if (mdResult.stdout.trim()) {
+      await core.summary
+        .addRaw('<details><summary>APM Audit Report</summary>\n\n')
+        .addRaw(mdResult.stdout)
+        .addRaw('\n</details>')
+        .write();
+    }
+  } catch {
+    // Markdown summary is best-effort — don't fail the action
+    core.debug('Could not generate markdown audit summary');
+  }
 }
 
 interface ObjectDep {

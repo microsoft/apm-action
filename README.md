@@ -138,7 +138,7 @@ Generate a SARIF report and upload it to GitHub Code Scanning for inline PR anno
 | `bundle` | No | | Restore from a bundle (local path or glob). Skips APM installation entirely. |
 | `target` | No | | Bundle target: `copilot`, `vscode`, `claude`, or `all` (used with `pack: true`) |
 | `archive` | No | `true` | Produce `.tar.gz` instead of directory (used with `pack: true`) |
-| `audit-report` | No | | Generate a SARIF audit report. Set to `true` for default path, or provide a custom path. |
+| `audit-report` | No | | Generate a SARIF audit report. Set to `true` for default path, or provide a custom path. A markdown summary is also written to `$GITHUB_STEP_SUMMARY` (collapsed in a `<details>` section). |
 
 ## Outputs
 

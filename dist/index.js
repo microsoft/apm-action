@@ -33271,7 +33271,7 @@ const _summary = new Summary();
  * @deprecated use `core.summary`
  */
 const markdownSummary = (/* unused pure expression or super */ null && (_summary));
-const summary = (/* unused pure expression or super */ null && (_summary));
+const summary = _summary;
 //# sourceMappingURL=summary.js.map
 ;// CONCATENATED MODULE: ./node_modules/@actions/core/lib/path-utils.js
 
@@ -34408,8 +34408,8 @@ function getExecOutput(commandLine, args, options) {
         let stdout = '';
         let stderr = '';
         //Using string decoder covers the case where a mult-byte character is split
-        const stdoutDecoder = new StringDecoder('utf8');
-        const stderrDecoder = new StringDecoder('utf8');
+        const stdoutDecoder = new external_string_decoder_.StringDecoder('utf8');
+        const stderrDecoder = new external_string_decoder_.StringDecoder('utf8');
         const originalStdoutListener = (_a = options === null || options === void 0 ? void 0 : options.listeners) === null || _a === void 0 ? void 0 : _a.stdout;
         const originalStdErrListener = (_b = options === null || options === void 0 ? void 0 : options.listeners) === null || _b === void 0 ? void 0 : _b.stderr;
         const stdErrListener = (data) => {
@@ -41327,6 +41327,27 @@ async function runAuditReport(cwd, reportPath) {
     }
     else if (auditRc === 2) {
         info('APM audit found warnings (non-critical) — see SARIF report for details');
+    }
+    // Write markdown summary to $GITHUB_STEP_SUMMARY
+    try {
+        const mdResult = await getExecOutput('apm', [
+            'audit', '-f', 'markdown',
+        ], {
+            cwd,
+            ignoreReturnCode: true,
+            silent: true,
+        });
+        if (mdResult.stdout.trim()) {
+            await summary
+                .addRaw('<details><summary>APM Audit Report</summary>\n\n')
+                .addRaw(mdResult.stdout)
+                .addRaw('\n</details>')
+                .write();
+        }
+    }
+    catch {
+        // Markdown summary is best-effort — don't fail the action
+        core_debug('Could not generate markdown audit summary');
     }
 }
 /**
