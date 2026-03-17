@@ -108,6 +108,22 @@ jobs:
       # Same primitives, different job. Byte-identical.
 ```
 
+### Audit report with Code Scanning
+
+Generate a SARIF report and upload it to GitHub Code Scanning for inline PR annotations:
+
+```yaml
+- uses: microsoft/apm-action@v1
+  id: apm
+  with:
+    audit-report: true
+- uses: github/codeql-action/upload-sarif@v3
+  if: always() && steps.apm.outputs.audit-report-path
+  with:
+    sarif_file: ${{ steps.apm.outputs.audit-report-path }}
+    category: apm-audit
+```
+
 ## Inputs
 
 | Input | Required | Default | Description |
@@ -122,6 +138,7 @@ jobs:
 | `bundle` | No | | Restore from a bundle (local path or glob). Skips APM installation entirely. |
 | `target` | No | | Bundle target: `copilot`, `vscode`, `claude`, or `all` (used with `pack: true`) |
 | `archive` | No | `true` | Produce `.tar.gz` instead of directory (used with `pack: true`) |
+| `audit-report` | No | | Generate a SARIF audit report. Set to `true` for default path, or provide a custom path. A markdown summary is also written to `$GITHUB_STEP_SUMMARY` (collapsed in a `<details>` section). |
 
 ## Outputs
 
@@ -130,6 +147,7 @@ jobs:
 | `success` | Whether the action succeeded (`true`/`false`) |
 | `primitives-path` | Path where agent primitives were deployed (`.github`) |
 | `bundle-path` | Path to the packed bundle (only set in pack mode) |
+| `audit-report-path` | Path to the generated SARIF audit report (if `audit-report` was set) |
 
 ## Third-Party Dependencies
 

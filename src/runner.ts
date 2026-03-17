@@ -25,6 +25,7 @@ export async function run(): Promise<void> {
     const bundleInput = core.getInput('bundle').trim();
     const packInput = core.getInput('pack') === 'true';
     const isolated = core.getInput('isolated') === 'true';
+    const auditReportInput = core.getInput('audit-report').trim();
 
     // Validate inputs before touching the filesystem.
     if (bundleInput && packInput) {
@@ -50,6 +51,16 @@ export async function run(): Promise<void> {
     }
     core.info(`Working directory: ${resolvedDir}`);
 
+    // Resolve audit report path
+    let auditReportPath: string | undefined;
+    if (auditReportInput) {
+      if (auditReportInput === 'true') {
+        auditReportPath = path.join(resolvedDir, 'apm-audit.sarif');
+      } else {
+        auditReportPath = path.resolve(resolvedDir, auditReportInput);
+      }
+    }
+
     // RESTORE MODE: extract bundle, skip APM installation entirely.
     // Directory was already created above (actionOwnsDir = true for bundle mode).
     if (bundleInput) {
@@ -61,6 +72,12 @@ export async function run(): Promise<void> {
 
       const primitivesPath = path.join(resolvedDir, '.github');
       core.setOutput('primitives-path', primitivesPath);
+
+      // Run audit on unpacked bundle if report requested
+      if (auditReportPath) {
+        await runAuditReport(resolvedDir, auditReportPath);
+      }
+
       core.setOutput('success', 'true');
       core.info('APM action completed successfully (restore mode)');
       return;
@@ -99,6 +116,11 @@ export async function run(): Promise<void> {
       }
     }
 
+    // Run content audit if report requested
+    if (auditReportPath) {
+      await runAuditReport(resolvedDir, auditReportPath);
+    }
+
     // 5. Run apm compile (opt-in)
     const compile = core.getInput('compile') === 'true';
     if (compile) {
@@ -133,6 +155,68 @@ export async function run(): Promise<void> {
     const msg = error instanceof Error ? error.message : String(error);
     core.setOutput('success', 'false');
     core.setFailed(`APM action failed: ${msg}`);
+  }
+}
+
+/**
+ * Run `apm audit` to generate a SARIF report.
+ * Non-zero exit codes are informational (1=critical, 2=warning) and do not fail the action.
+ */
+async function runAuditReport(cwd: string, reportPath: string): Promise<void> {
+  // Check if apm is available (may not be in restore mode)
+  const apmAvailable = await exec.exec('apm', ['--version'], {
+    ignoreReturnCode: true,
+    silent: true,
+  }).catch(() => 1) === 0;
+
+  if (!apmAvailable) {
+    core.warning(
+      'APM not installed — cannot generate audit report. '
+      + 'Install APM for hidden-character audit coverage.',
+    );
+    return;
+  }
+
+  core.info('Running content audit...');
+  const auditRc = await exec.exec('apm', [
+    'audit', '-f', 'sarif', '-o', reportPath,
+  ], {
+    cwd,
+    ignoreReturnCode: true,
+    env: { ...process.env as Record<string, string> },
+  });
+
+  if (fs.existsSync(reportPath)) {
+    core.setOutput('audit-report-path', reportPath);
+    core.info(`Audit report generated: ${reportPath}`);
+  }
+
+  if (auditRc === 1) {
+    core.warning('APM audit found critical hidden-character findings — see SARIF report for details');
+  } else if (auditRc === 2) {
+    core.info('APM audit found warnings (non-critical) — see SARIF report for details');
+  }
+
+  // Write markdown summary to $GITHUB_STEP_SUMMARY
+  try {
+    const mdResult = await exec.getExecOutput('apm', [
+      'audit', '-f', 'markdown',
+    ], {
+      cwd,
+      ignoreReturnCode: true,
+      silent: true,
+    });
+
+    if (mdResult.stdout.trim()) {
+      await core.summary
+        .addRaw('<details><summary>APM Audit Report</summary>\n\n')
+        .addRaw(mdResult.stdout)
+        .addRaw('\n</details>')
+        .write();
+    }
+  } catch {
+    // Markdown summary is best-effort — don't fail the action
+    core.debug('Could not generate markdown audit summary');
   }
 }
 
