@@ -2,6 +2,8 @@
 
 A GitHub Action that installs [APM (Agent Package Manager)](https://github.com/microsoft/apm) and deploys agent primitives (instructions, prompts, skills, agents) into your CI workflows. One line. Zero config.
 
+📖 [APM Documentation](https://microsoft.github.io/apm) · [Security Model](https://microsoft.github.io/apm/enterprise/security/) · [CI/CD Guide](https://microsoft.github.io/apm/integrations/ci-cd/)
+
 ## Usage
 
 ```yaml
@@ -32,7 +34,7 @@ This installs the APM CLI, reads your `apm.yml`, and runs `apm install`.
 
 ### Pack mode (produce a bundle)
 
-Install dependencies and pack them into a self-contained `.tar.gz` archive. Combine with `actions/upload-artifact` to share across jobs.
+Install dependencies, scan for hidden Unicode threats, and pack into a self-contained `.tar.gz` archive. Add `audit-report` to generate a SARIF report alongside the bundle:
 
 ```yaml
 - uses: microsoft/apm-action@v1
@@ -40,12 +42,21 @@ Install dependencies and pack them into a self-contained `.tar.gz` archive. Comb
   with:
     pack: 'true'
     target: 'copilot'
+    audit-report: true
+
+- uses: github/codeql-action/upload-sarif@v3
+  if: always() && steps.pack.outputs.audit-report-path
+  with:
+    sarif_file: ${{ steps.pack.outputs.audit-report-path }}
+    category: apm-audit
 
 - uses: actions/upload-artifact@v4
   with:
     name: agent-bundle
     path: ${{ steps.pack.outputs.bundle-path }}
 ```
+
+This works with all modes — `isolated`, inline `dependencies`, or from `apm.yml`.
 
 ### Restore mode (zero-install)
 
@@ -108,9 +119,9 @@ jobs:
       # Same primitives, different job. Byte-identical.
 ```
 
-### Audit report with Code Scanning
+### Security scanning
 
-Generate a SARIF report and upload it to GitHub Code Scanning for inline PR annotations:
+`apm install` automatically blocks packages with critical hidden-character findings — no configuration needed. Add `audit-report` for visibility: a SARIF report for [Code Scanning](https://docs.github.com/en/code-security/code-scanning) annotations and a markdown summary in `$GITHUB_STEP_SUMMARY`. See the [APM security model](https://microsoft.github.io/apm/enterprise/security/) for details.
 
 ```yaml
 - uses: microsoft/apm-action@v1
@@ -138,7 +149,7 @@ Generate a SARIF report and upload it to GitHub Code Scanning for inline PR anno
 | `bundle` | No | | Restore from a bundle (local path or glob). Skips APM installation entirely. |
 | `target` | No | | Bundle target: `copilot`, `vscode`, `claude`, or `all` (used with `pack: true`) |
 | `archive` | No | `true` | Produce `.tar.gz` instead of directory (used with `pack: true`) |
-| `audit-report` | No | | Generate a SARIF audit report. Set to `true` for default path, or provide a custom path. A markdown summary is also written to `$GITHUB_STEP_SUMMARY` (collapsed in a `<details>` section). |
+| `audit-report` | No | | Generate a SARIF audit report (hidden Unicode scanning). `apm install` already blocks critical findings; this adds reporting for Code Scanning and a markdown summary in `$GITHUB_STEP_SUMMARY`. Set to `true` for default path, or provide a custom path. |
 
 ## Outputs
 
