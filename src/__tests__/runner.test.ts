@@ -5,21 +5,30 @@ import path from 'node:path';
 
 const mockInfo = jest.fn();
 const mockWarning = jest.fn();
+const mockDebug = jest.fn();
 const mockGetInput = jest.fn();
 const mockSetOutput = jest.fn();
 const mockSetFailed = jest.fn();
+const mockSummary = {
+  addRaw: jest.fn().mockReturnThis(),
+  write: jest.fn().mockResolvedValue(undefined as void),
+};
 
 jest.unstable_mockModule('@actions/core', () => ({
   info: mockInfo,
   warning: mockWarning,
+  debug: mockDebug,
   getInput: mockGetInput,
   setOutput: mockSetOutput,
   setFailed: mockSetFailed,
+  summary: mockSummary,
 }));
 
 const mockExec = jest.fn<() => Promise<number>>();
+const mockGetExecOutput = jest.fn<() => Promise<{ exitCode: number; stdout: string; stderr: string }>>();
 jest.unstable_mockModule('@actions/exec', () => ({
   exec: mockExec,
+  getExecOutput: mockGetExecOutput,
 }));
 
 const mockEnsureApmInstalled = jest.fn<() => Promise<void>>();
@@ -141,6 +150,7 @@ describe('run', () => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-action-run-'));
     mockEnsureApmInstalled.mockResolvedValue(undefined);
     mockExec.mockResolvedValue(0);
+    mockGetExecOutput.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
   });
 
   afterEach(() => {
