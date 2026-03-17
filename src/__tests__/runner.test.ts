@@ -11,7 +11,7 @@ const mockSetOutput = jest.fn();
 const mockSetFailed = jest.fn();
 const mockSummary = {
   addRaw: jest.fn().mockReturnThis(),
-  write: jest.fn().mockResolvedValue(undefined as void),
+  write: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
 };
 
 jest.unstable_mockModule('@actions/core', () => ({
