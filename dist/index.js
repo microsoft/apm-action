@@ -34580,7 +34580,7 @@ function exportVariable(name, val) {
  * ```
  */
 function core_setSecret(secret) {
-    issueCommand('add-mask', {}, secret);
+    command_issueCommand('add-mask', {}, secret);
 }
 /**
  * Prepends inputPath to the PATH (for this action and future actions)
@@ -41181,6 +41181,14 @@ async function run() {
         const packInput = getInput('pack') === 'true';
         const isolated = getInput('isolated') === 'true';
         const auditReportInput = getInput('audit-report').trim();
+        // Pass github-token input to APM subprocess as GITHUB_TOKEN.
+        // GitHub Actions does not auto-export input values as env vars —
+        // without this, APM runs unauthenticated (rate-limited, no private repo access).
+        const githubToken = getInput('github-token');
+        if (githubToken) {
+            core_setSecret(githubToken);
+            process.env.GITHUB_TOKEN = githubToken;
+        }
         // Validate inputs before touching the filesystem.
         if (bundleInput && packInput) {
             throw new Error("'pack' and 'bundle' inputs are mutually exclusive");
