@@ -443,4 +443,42 @@ describe('run', () => {
       }
     }
   });
+
+  it('does not clobber existing GITHUB_TOKEN from job-level env', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: test\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+    mockExec.mockResolvedValue(0);
+
+    const prevToken = process.env.GITHUB_TOKEN;
+    process.env.GITHUB_TOKEN = 'ghp_userProvidedPAT';
+
+    try {
+      mockGetInput.mockImplementation((name: unknown) => {
+        switch (name) {
+          case 'working-directory': return tmpDir;
+          case 'dependencies': return '';
+          case 'isolated': return 'false';
+          case 'bundle': return '';
+          case 'pack': return 'false';
+          case 'compile': return 'false';
+          case 'script': return '';
+          case 'audit-report': return '';
+          case 'github-token': return 'ghs_defaultActionToken';
+          default: return '';
+        }
+      });
+
+      await run();
+
+      expect(mockSetFailed).not.toHaveBeenCalled();
+      // User's PAT should be preserved, not overwritten by the action default
+      expect(process.env.GITHUB_TOKEN).toBe('ghp_userProvidedPAT');
+    } finally {
+      if (prevToken === undefined) {
+        delete process.env.GITHUB_TOKEN;
+      } else {
+        process.env.GITHUB_TOKEN = prevToken;
+      }
+    }
+  });
 });
