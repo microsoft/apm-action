@@ -9,6 +9,7 @@ const mockDebug = jest.fn();
 const mockGetInput = jest.fn();
 const mockSetOutput = jest.fn();
 const mockSetFailed = jest.fn();
+const mockSetSecret = jest.fn();
 const mockSummary = {
   addRaw: jest.fn().mockReturnThis(),
   write: jest.fn<() => Promise<void>>().mockResolvedValue(undefined),
@@ -21,6 +22,7 @@ jest.unstable_mockModule('@actions/core', () => ({
   getInput: mockGetInput,
   setOutput: mockSetOutput,
   setFailed: mockSetFailed,
+  setSecret: mockSetSecret,
   summary: mockSummary,
 }));
 
@@ -361,5 +363,84 @@ describe('run', () => {
     );
     expect(auditCall).toBeUndefined();
     expect(mockSetOutput).not.toHaveBeenCalledWith('audit-report-path', expect.anything());
+  });
+
+  it('passes github-token input as GITHUB_TOKEN env var', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: test\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+    mockExec.mockResolvedValue(0);
+
+    const prevToken = process.env.GITHUB_TOKEN;
+    delete process.env.GITHUB_TOKEN;
+
+    try {
+      mockGetInput.mockImplementation((name: unknown) => {
+        switch (name) {
+          case 'working-directory': return tmpDir;
+          case 'dependencies': return '';
+          case 'isolated': return 'false';
+          case 'bundle': return '';
+          case 'pack': return 'false';
+          case 'compile': return 'false';
+          case 'script': return '';
+          case 'audit-report': return '';
+          case 'github-token': return 'ghs_fakeToken123';
+          default: return '';
+        }
+      });
+
+      await run();
+
+      expect(mockSetFailed).not.toHaveBeenCalled();
+      // Token should be set in process.env for subprocess inheritance
+      expect(process.env.GITHUB_TOKEN).toBe('ghs_fakeToken123');
+      // Token should be masked in logs
+      expect(mockSetSecret).toHaveBeenCalledWith('ghs_fakeToken123');
+    } finally {
+      if (prevToken === undefined) {
+        delete process.env.GITHUB_TOKEN;
+      } else {
+        process.env.GITHUB_TOKEN = prevToken;
+      }
+    }
+  });
+
+  it('does not set GITHUB_TOKEN when github-token input is empty', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: test\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+    mockExec.mockResolvedValue(0);
+
+    const prevToken = process.env.GITHUB_TOKEN;
+    delete process.env.GITHUB_TOKEN;
+
+    try {
+      mockGetInput.mockImplementation((name: unknown) => {
+        switch (name) {
+          case 'working-directory': return tmpDir;
+          case 'dependencies': return '';
+          case 'isolated': return 'false';
+          case 'bundle': return '';
+          case 'pack': return 'false';
+          case 'compile': return 'false';
+          case 'script': return '';
+          case 'audit-report': return '';
+          case 'github-token': return '';
+          default: return '';
+        }
+      });
+
+      await run();
+
+      expect(mockSetFailed).not.toHaveBeenCalled();
+      // Token should NOT be set when input is empty
+      expect(process.env.GITHUB_TOKEN).toBeUndefined();
+      expect(mockSetSecret).not.toHaveBeenCalled();
+    } finally {
+      if (prevToken === undefined) {
+        delete process.env.GITHUB_TOKEN;
+      } else {
+        process.env.GITHUB_TOKEN = prevToken;
+      }
+    }
   });
 });

@@ -27,6 +27,15 @@ export async function run(): Promise<void> {
     const isolated = core.getInput('isolated') === 'true';
     const auditReportInput = core.getInput('audit-report').trim();
 
+    // Pass github-token input to APM subprocess as GITHUB_TOKEN.
+    // GitHub Actions does not auto-export input values as env vars —
+    // without this, APM runs unauthenticated (rate-limited, no private repo access).
+    const githubToken = core.getInput('github-token');
+    if (githubToken) {
+      core.setSecret(githubToken);
+      process.env.GITHUB_TOKEN = githubToken;
+    }
+
     // Validate inputs before touching the filesystem.
     if (bundleInput && packInput) {
       throw new Error("'pack' and 'bundle' inputs are mutually exclusive");
