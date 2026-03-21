@@ -27,15 +27,16 @@ export async function run(): Promise<void> {
     const isolated = core.getInput('isolated') === 'true';
     const auditReportInput = core.getInput('audit-report').trim();
 
-    // Pass github-token input to APM subprocess as GITHUB_TOKEN.
+    // Pass github-token input to APM subprocess as GITHUB_TOKEN and GITHUB_APM_PAT.
     // GitHub Actions does not auto-export input values as env vars —
     // without this, APM runs unauthenticated (rate-limited, no private repo access).
-    // Use ??= so a GITHUB_TOKEN already in the environment (e.g., a PAT set via
-    // job-level `env:`) is not clobbered by the action's default github.token.
+    // Use ??= so values already in the environment (e.g., a PAT set via job-level
+    // `env:`) are not clobbered by the action's default github.token.
     const githubToken = core.getInput('github-token');
     if (githubToken) {
       core.setSecret(githubToken);
       process.env.GITHUB_TOKEN ??= githubToken;
+      process.env.GITHUB_APM_PAT ??= githubToken;
     }
 
     // Validate inputs before touching the filesystem.

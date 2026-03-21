@@ -135,12 +135,45 @@ jobs:
     category: apm-audit
 ```
 
+## Private repo authentication
+
+By default, `github-token` (which defaults to `${{ github.token }}`) is automatically forwarded to APM as `GITHUB_APM_PAT`. This means same-org private repos work with zero config.
+
+```yaml
+# Same-org private repos: zero config
+- uses: microsoft/apm-action@v1
+```
+
+For cross-org private repos, pass a PAT with broader scope via the `github-token` input:
+
+```yaml
+# Cross-org private repos: pass a broader-scoped PAT
+- uses: microsoft/apm-action@v1
+  with:
+    github-token: ${{ secrets.APM_PAT }}
+```
+
+For multi-org or multi-platform scenarios, use the `env:` block for full control. An explicit `GITHUB_APM_PAT` in `env:` always wins over the auto-forwarded value:
+
+```yaml
+# Multi-org / multi-platform: full control via env block
+- uses: microsoft/apm-action@v1
+  env:
+    GITHUB_APM_PAT: ${{ secrets.APM_PAT }}
+    GITHUB_APM_PAT_CONTOSO: ${{ secrets.APM_PAT_CONTOSO }}
+    ADO_APM_PAT: ${{ secrets.ADO_PAT }}
+    ARTIFACTORY_APM_TOKEN: ${{ secrets.ARTIFACTORY_TOKEN }}
+```
+
+> **Note:** GitHub Actions forbids secrets named with the `GITHUB_` prefix, so you cannot create a secret called `GITHUB_APM_PAT` directly. The auto-forward from `github-token` covers the common case. For cross-org tokens, name your secret something like `APM_PAT` and pass it via `github-token` or `env: GITHUB_APM_PAT`.
+
 ## Inputs
 
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `working-directory` | No | `.` | Working directory for execution. Must exist in non-isolated mode (with your `apm.yml`). In `isolated`, `pack`, or `bundle` modes the directory is created automatically. |
 | `apm-version` | No | `latest` | APM version to install |
+| `github-token` | No | `${{ github.token }}` | GitHub token for API calls. Auto-forwarded as `GITHUB_APM_PAT` so same-org private repos work with zero config. Pass a broader-scoped PAT for cross-org access. |
 | `script` | No | | APM script to run after install |
 | `dependencies` | No | | YAML array of extra dependencies to install (additive to apm.yml) |
 | `isolated` | No | `false` | Ignore apm.yml and clear pre-existing primitive dirs — install only inline dependencies |

@@ -41181,15 +41181,16 @@ async function run() {
         const packInput = getInput('pack') === 'true';
         const isolated = getInput('isolated') === 'true';
         const auditReportInput = getInput('audit-report').trim();
-        // Pass github-token input to APM subprocess as GITHUB_TOKEN.
+        // Pass github-token input to APM subprocess as GITHUB_TOKEN and GITHUB_APM_PAT.
         // GitHub Actions does not auto-export input values as env vars —
         // without this, APM runs unauthenticated (rate-limited, no private repo access).
-        // Use ??= so a GITHUB_TOKEN already in the environment (e.g., a PAT set via
-        // job-level `env:`) is not clobbered by the action's default github.token.
+        // Use ??= so values already in the environment (e.g., a PAT set via job-level
+        // `env:`) are not clobbered by the action's default github.token.
         const githubToken = getInput('github-token');
         if (githubToken) {
             core_setSecret(githubToken);
             process.env.GITHUB_TOKEN ??= githubToken;
+            process.env.GITHUB_APM_PAT ??= githubToken;
         }
         // Validate inputs before touching the filesystem.
         if (bundleInput && packInput) {
