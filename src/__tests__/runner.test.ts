@@ -365,13 +365,15 @@ describe('run', () => {
     expect(mockSetOutput).not.toHaveBeenCalledWith('audit-report-path', expect.anything());
   });
 
-  it('passes github-token input as GITHUB_TOKEN env var', async () => {
+  it('passes github-token input as GITHUB_TOKEN and GITHUB_APM_PAT env vars', async () => {
     fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: test\nversion: 1.0.0\n');
     fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
     mockExec.mockResolvedValue(0);
 
     const prevToken = process.env.GITHUB_TOKEN;
+    const prevApmPat = process.env.GITHUB_APM_PAT;
     delete process.env.GITHUB_TOKEN;
+    delete process.env.GITHUB_APM_PAT;
 
     try {
       mockGetInput.mockImplementation((name: unknown) => {
@@ -394,6 +396,7 @@ describe('run', () => {
       expect(mockSetFailed).not.toHaveBeenCalled();
       // Token should be set in process.env for subprocess inheritance
       expect(process.env.GITHUB_TOKEN).toBe('ghs_fakeToken123');
+      expect(process.env.GITHUB_APM_PAT).toBe('ghs_fakeToken123');
       // Token should be masked in logs
       expect(mockSetSecret).toHaveBeenCalledWith('ghs_fakeToken123');
     } finally {
@@ -402,16 +405,23 @@ describe('run', () => {
       } else {
         process.env.GITHUB_TOKEN = prevToken;
       }
+      if (prevApmPat === undefined) {
+        delete process.env.GITHUB_APM_PAT;
+      } else {
+        process.env.GITHUB_APM_PAT = prevApmPat;
+      }
     }
   });
 
-  it('does not set GITHUB_TOKEN when github-token input is empty', async () => {
+  it('does not set GITHUB_TOKEN or GITHUB_APM_PAT when github-token input is empty', async () => {
     fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: test\nversion: 1.0.0\n');
     fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
     mockExec.mockResolvedValue(0);
 
     const prevToken = process.env.GITHUB_TOKEN;
+    const prevApmPat = process.env.GITHUB_APM_PAT;
     delete process.env.GITHUB_TOKEN;
+    delete process.env.GITHUB_APM_PAT;
 
     try {
       mockGetInput.mockImplementation((name: unknown) => {
@@ -432,14 +442,20 @@ describe('run', () => {
       await run();
 
       expect(mockSetFailed).not.toHaveBeenCalled();
-      // Token should NOT be set when input is empty
+      // Tokens should NOT be set when input is empty
       expect(process.env.GITHUB_TOKEN).toBeUndefined();
+      expect(process.env.GITHUB_APM_PAT).toBeUndefined();
       expect(mockSetSecret).not.toHaveBeenCalled();
     } finally {
       if (prevToken === undefined) {
         delete process.env.GITHUB_TOKEN;
       } else {
         process.env.GITHUB_TOKEN = prevToken;
+      }
+      if (prevApmPat === undefined) {
+        delete process.env.GITHUB_APM_PAT;
+      } else {
+        process.env.GITHUB_APM_PAT = prevApmPat;
       }
     }
   });
@@ -478,6 +494,44 @@ describe('run', () => {
         delete process.env.GITHUB_TOKEN;
       } else {
         process.env.GITHUB_TOKEN = prevToken;
+      }
+    }
+  });
+
+  it('does not clobber existing GITHUB_APM_PAT from job-level env', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: test\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+    mockExec.mockResolvedValue(0);
+
+    const prevApmPat = process.env.GITHUB_APM_PAT;
+    process.env.GITHUB_APM_PAT = 'ghp_userProvidedApmPAT';
+
+    try {
+      mockGetInput.mockImplementation((name: unknown) => {
+        switch (name) {
+          case 'working-directory': return tmpDir;
+          case 'dependencies': return '';
+          case 'isolated': return 'false';
+          case 'bundle': return '';
+          case 'pack': return 'false';
+          case 'compile': return 'false';
+          case 'script': return '';
+          case 'audit-report': return '';
+          case 'github-token': return 'ghs_defaultActionToken';
+          default: return '';
+        }
+      });
+
+      await run();
+
+      expect(mockSetFailed).not.toHaveBeenCalled();
+      // User's explicitly-set GITHUB_APM_PAT should be preserved
+      expect(process.env.GITHUB_APM_PAT).toBe('ghp_userProvidedApmPAT');
+    } finally {
+      if (prevApmPat === undefined) {
+        delete process.env.GITHUB_APM_PAT;
+      } else {
+        process.env.GITHUB_APM_PAT = prevApmPat;
       }
     }
   });
