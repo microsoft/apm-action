@@ -41198,8 +41198,10 @@ async function run() {
         const githubToken = getInput('github-token');
         if (githubToken) {
             core_setSecret(githubToken);
-            const callerProvidedToken = process.env.GITHUB_TOKEN != null;
-            process.env.GITHUB_TOKEN ??= githubToken;
+            const callerProvidedToken = !!process.env.GITHUB_TOKEN;
+            if (!process.env.GITHUB_TOKEN) {
+                process.env.GITHUB_TOKEN = githubToken;
+            }
             if (!callerProvidedToken) {
                 process.env.GITHUB_APM_PAT ??= githubToken;
             }

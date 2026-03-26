@@ -601,4 +601,54 @@ describe('run', () => {
       }
     }
   });
+
+  it('treats empty-string GITHUB_TOKEN as not-provided and forwards token correctly', async () => {
+    // Edge case: GITHUB_TOKEN is set to '' (empty string). The ??= operator
+    // treats '' as not-nullish, so it wouldn't overwrite it. We must treat
+    // empty-string as "not provided" to ensure APM gets a usable token.
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: test\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+    mockExec.mockResolvedValue(0);
+
+    const prevToken = process.env.GITHUB_TOKEN;
+    const prevApmPat = process.env.GITHUB_APM_PAT;
+    process.env.GITHUB_TOKEN = '';
+    delete process.env.GITHUB_APM_PAT;
+
+    try {
+      mockGetInput.mockImplementation((name: unknown) => {
+        switch (name) {
+          case 'working-directory': return tmpDir;
+          case 'dependencies': return '';
+          case 'isolated': return 'false';
+          case 'bundle': return '';
+          case 'pack': return 'false';
+          case 'compile': return 'false';
+          case 'script': return '';
+          case 'audit-report': return '';
+          case 'github-token': return 'ghs_validToken123';
+          default: return '';
+        }
+      });
+
+      await run();
+
+      expect(mockSetFailed).not.toHaveBeenCalled();
+      // Empty GITHUB_TOKEN should be overwritten with the input token
+      expect(process.env.GITHUB_TOKEN).toBe('ghs_validToken123');
+      // GITHUB_APM_PAT should also be set (no "real" caller token existed)
+      expect(process.env.GITHUB_APM_PAT).toBe('ghs_validToken123');
+    } finally {
+      if (prevToken === undefined) {
+        delete process.env.GITHUB_TOKEN;
+      } else {
+        process.env.GITHUB_TOKEN = prevToken;
+      }
+      if (prevApmPat === undefined) {
+        delete process.env.GITHUB_APM_PAT;
+      } else {
+        process.env.GITHUB_APM_PAT = prevApmPat;
+      }
+    }
+  });
 });

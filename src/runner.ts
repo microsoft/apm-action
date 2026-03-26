@@ -44,8 +44,10 @@ export async function run(): Promise<void> {
     const githubToken = core.getInput('github-token');
     if (githubToken) {
       core.setSecret(githubToken);
-      const callerProvidedToken = process.env.GITHUB_TOKEN != null;
-      process.env.GITHUB_TOKEN ??= githubToken;
+      const callerProvidedToken = !!process.env.GITHUB_TOKEN;
+      if (!process.env.GITHUB_TOKEN) {
+        process.env.GITHUB_TOKEN = githubToken;
+      }
       if (!callerProvidedToken) {
         process.env.GITHUB_APM_PAT ??= githubToken;
       }
