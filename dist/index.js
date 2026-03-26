@@ -41181,16 +41181,30 @@ async function run() {
         const packInput = getInput('pack') === 'true';
         const isolated = getInput('isolated') === 'true';
         const auditReportInput = getInput('audit-report').trim();
-        // Pass github-token input to APM subprocess as GITHUB_TOKEN and GITHUB_APM_PAT.
+        // Pass github-token input to APM subprocess as GITHUB_TOKEN.
         // GitHub Actions does not auto-export input values as env vars —
         // without this, APM runs unauthenticated (rate-limited, no private repo access).
-        // Use ??= so values already in the environment (e.g., a PAT set via job-level
-        // `env:`) are not clobbered by the action's default github.token.
+        // Use ??= so a GITHUB_TOKEN already in the environment (e.g., a PAT set via
+        // job-level `env:`) is not clobbered by the action's default github.token.
+        //
+        // GITHUB_APM_PAT is only forwarded when GITHUB_TOKEN was NOT already present.
+        // When a caller provides GITHUB_TOKEN via step/job-level env: (e.g., a GitHub
+        // App token from gh-aw), that token carries higher-specificity auth than the
+        // action's default github.token.  Since APM's token precedence is
+        //   GITHUB_APM_PAT > GITHUB_TOKEN > GH_TOKEN
+        // auto-setting GITHUB_APM_PAT to the default github.token would shadow the
+        // caller's intentional GITHUB_TOKEN, causing auth failures for cross-org or
+        // private-repo access.
         const githubToken = getInput('github-token');
         if (githubToken) {
             core_setSecret(githubToken);
-            process.env.GITHUB_TOKEN ??= githubToken;
-            process.env.GITHUB_APM_PAT ??= githubToken;
+            const callerProvidedToken = !!process.env.GITHUB_TOKEN;
+            if (!process.env.GITHUB_TOKEN) {
+                process.env.GITHUB_TOKEN = githubToken;
+            }
+            if (!callerProvidedToken) {
+                process.env.GITHUB_APM_PAT ??= githubToken;
+            }
         }
         // Validate inputs before touching the filesystem.
         if (bundleInput && packInput) {
