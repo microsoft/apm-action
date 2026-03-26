@@ -466,7 +466,9 @@ describe('run', () => {
     mockExec.mockResolvedValue(0);
 
     const prevToken = process.env.GITHUB_TOKEN;
+    const prevApmPat = process.env.GITHUB_APM_PAT;
     process.env.GITHUB_TOKEN = 'ghp_userProvidedPAT';
+    delete process.env.GITHUB_APM_PAT;
 
     try {
       mockGetInput.mockImplementation((name: unknown) => {
@@ -489,11 +491,75 @@ describe('run', () => {
       expect(mockSetFailed).not.toHaveBeenCalled();
       // User's PAT should be preserved, not overwritten by the action default
       expect(process.env.GITHUB_TOKEN).toBe('ghp_userProvidedPAT');
+      // GITHUB_APM_PAT must NOT be set to the default token — doing so would
+      // shadow the caller's intentional GITHUB_TOKEN in APM's precedence chain
+      expect(process.env.GITHUB_APM_PAT).toBeUndefined();
     } finally {
       if (prevToken === undefined) {
         delete process.env.GITHUB_TOKEN;
       } else {
         process.env.GITHUB_TOKEN = prevToken;
+      }
+      if (prevApmPat === undefined) {
+        delete process.env.GITHUB_APM_PAT;
+      } else {
+        process.env.GITHUB_APM_PAT = prevApmPat;
+      }
+    }
+  });
+
+  it('does not shadow caller GITHUB_TOKEN with GITHUB_APM_PAT (gh-aw app-token scenario)', async () => {
+    // Reproduces the gh-aw bug: gh-aw sets GITHUB_TOKEN to a GitHub App token
+    // (cross-org access) via step env:, while the action's github-token input
+    // defaults to github.token (scoped to the workflow repo only).
+    // Before the fix, GITHUB_APM_PAT was set to the default token, which
+    // shadowed the App token in APM's precedence chain.
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: test\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+    mockExec.mockResolvedValue(0);
+
+    const prevToken = process.env.GITHUB_TOKEN;
+    const prevApmPat = process.env.GITHUB_APM_PAT;
+    // Simulate gh-aw: step env sets GITHUB_TOKEN to the minted App token
+    process.env.GITHUB_TOKEN = 'ghs_crossOrgAppToken_abc123';
+    delete process.env.GITHUB_APM_PAT;
+
+    try {
+      mockGetInput.mockImplementation((name: unknown) => {
+        switch (name) {
+          case 'working-directory': return tmpDir;
+          case 'dependencies': return '- some-org/private-marketplace/plugins/essentials';
+          case 'isolated': return 'true';
+          case 'bundle': return '';
+          case 'pack': return 'true';
+          case 'compile': return 'false';
+          case 'script': return '';
+          case 'audit-report': return '';
+          case 'target': return 'copilot';
+          case 'archive': return 'true';
+          // This is the default github.token — NOT the App token
+          case 'github-token': return 'ghs_workflowDefaultToken_xyz789';
+          default: return '';
+        }
+      });
+
+      await run();
+
+      // GITHUB_TOKEN must remain the App token (not overwritten)
+      expect(process.env.GITHUB_TOKEN).toBe('ghs_crossOrgAppToken_abc123');
+      // GITHUB_APM_PAT must NOT be set — if it were, APM would use it
+      // (higher precedence) instead of the correct App token
+      expect(process.env.GITHUB_APM_PAT).toBeUndefined();
+    } finally {
+      if (prevToken === undefined) {
+        delete process.env.GITHUB_TOKEN;
+      } else {
+        process.env.GITHUB_TOKEN = prevToken;
+      }
+      if (prevApmPat === undefined) {
+        delete process.env.GITHUB_APM_PAT;
+      } else {
+        process.env.GITHUB_APM_PAT = prevApmPat;
       }
     }
   });
