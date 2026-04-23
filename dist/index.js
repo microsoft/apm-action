@@ -41268,6 +41268,7 @@ async function run() {
         const bundleInput = getInput('bundle').trim();
         const packInput = getInput('pack') === 'true';
         const isolated = getInput('isolated') === 'true';
+        const cliOnly = getInput('cli-only') === 'true';
         const auditReportInput = getInput('audit-report').trim();
         // Pass github-token input to APM subprocess as GITHUB_TOKEN.
         // GitHub Actions does not auto-export input values as env vars —
@@ -41298,10 +41299,38 @@ async function run() {
         if (bundleInput && packInput) {
             throw new Error("'pack' and 'bundle' inputs are mutually exclusive");
         }
+        if (cliOnly) {
+            // CLI-only mode is a pure "setup" mode — install the binary and stop.
+            // Combining it with any post-install behavior is almost certainly a
+            // misconfiguration; fail fast with a clear message rather than silently
+            // ignoring the conflicting inputs.
+            const conflicts = [];
+            if (bundleInput)
+                conflicts.push('bundle');
+            if (packInput)
+                conflicts.push('pack');
+            if (isolated)
+                conflicts.push('isolated');
+            if (getInput('compile') === 'true')
+                conflicts.push('compile');
+            if (getInput('script').trim())
+                conflicts.push('script');
+            if (getInput('dependencies').trim())
+                conflicts.push('dependencies');
+            if (auditReportInput)
+                conflicts.push('audit-report');
+            if (conflicts.length > 0) {
+                throw new Error(`'cli-only: true' cannot be combined with: ${conflicts.join(', ')}. `
+                    + 'CLI-only mode installs the APM binary and stops — '
+                    + 'invoke apm yourself in subsequent steps.');
+            }
+        }
         // Directory creation contract:
         //   - isolated / pack / bundle (restore) modes: the action owns the workspace
         //     lifecycle and creates the directory automatically. These modes bootstrap
         //     everything from scratch — there is no pre-existing project to find.
+        //   - cli-only mode: no working directory is required at all (we just install
+        //     the binary), so skip the existence check entirely.
         //   - non-isolated mode: the caller owns the project directory (which must
         //     contain apm.yml). If it doesn't exist, we fail fast with a clear message
         //     rather than silently creating an empty directory that would just fail later.
@@ -41309,7 +41338,7 @@ async function run() {
         if (actionOwnsDir) {
             external_fs_namespaceObject.mkdirSync(resolvedDir, { recursive: true });
         }
-        else if (!external_fs_namespaceObject.existsSync(resolvedDir)) {
+        else if (!cliOnly && !external_fs_namespaceObject.existsSync(resolvedDir)) {
             throw new Error(`Working directory does not exist: ${resolvedDir}. ` +
                 'In non-isolated mode the directory must already contain your project (with apm.yml). ' +
                 'Use isolated: true if you want the action to create it automatically.');
@@ -41345,6 +41374,13 @@ async function run() {
         }
         // 1. Install APM CLI (install + pack modes)
         await ensureApmInstalled();
+        // CLI-only mode: stop after installing the binary. The user will invoke
+        // apm themselves in subsequent steps (similar to setup-node, setup-python).
+        if (cliOnly) {
+            setOutput('success', 'true');
+            info('APM CLI installed (cli-only mode) — apm is now available on PATH');
+            return;
+        }
         // 2. Parse inputs
         const depsInput = getInput('dependencies').trim();
         // 3. Handle isolated mode: clear existing primitives, generate apm.yml from inline deps only.
