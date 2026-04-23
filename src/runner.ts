@@ -25,6 +25,10 @@ export async function run(): Promise<void> {
     const bundleInput = core.getInput('bundle').trim();
     const packInput = core.getInput('pack') === 'true';
     const isolated = core.getInput('isolated') === 'true';
+    const cliOnly = core.getInput('cli-only') === 'true';
+    const compileInput = core.getInput('compile') === 'true';
+    const scriptInput = core.getInput('script').trim();
+    const depsInput = core.getInput('dependencies').trim();
     const auditReportInput = core.getInput('audit-report').trim();
 
     // Pass github-token input to APM subprocess as GITHUB_TOKEN.
@@ -58,17 +62,41 @@ export async function run(): Promise<void> {
       throw new Error("'pack' and 'bundle' inputs are mutually exclusive");
     }
 
+    if (cliOnly) {
+      // CLI-only mode is a pure "setup" mode — install the binary and stop.
+      // Combining it with any post-install behavior is almost certainly a
+      // misconfiguration; fail fast with a clear message rather than silently
+      // ignoring the conflicting inputs.
+      const conflicts: string[] = [];
+      if (bundleInput) conflicts.push('bundle');
+      if (packInput) conflicts.push('pack');
+      if (isolated) conflicts.push('isolated');
+      if (compileInput) conflicts.push('compile');
+      if (scriptInput) conflicts.push('script');
+      if (depsInput) conflicts.push('dependencies');
+      if (auditReportInput) conflicts.push('audit-report');
+      if (conflicts.length > 0) {
+        throw new Error(
+          `'cli-only: true' cannot be combined with: ${conflicts.join(', ')}. `
+          + 'CLI-only mode installs the APM binary and stops — '
+          + 'invoke apm yourself in subsequent steps.',
+        );
+      }
+    }
+
     // Directory creation contract:
     //   - isolated / pack / bundle (restore) modes: the action owns the workspace
     //     lifecycle and creates the directory automatically. These modes bootstrap
     //     everything from scratch — there is no pre-existing project to find.
+    //   - cli-only mode: no working directory is required at all (we just install
+    //     the binary), so skip the existence check entirely.
     //   - non-isolated mode: the caller owns the project directory (which must
     //     contain apm.yml). If it doesn't exist, we fail fast with a clear message
     //     rather than silently creating an empty directory that would just fail later.
     const actionOwnsDir = isolated || packInput || !!bundleInput;
     if (actionOwnsDir) {
       fs.mkdirSync(resolvedDir, { recursive: true });
-    } else if (!fs.existsSync(resolvedDir)) {
+    } else if (!cliOnly && !fs.existsSync(resolvedDir)) {
       throw new Error(
         `Working directory does not exist: ${resolvedDir}. ` +
         'In non-isolated mode the directory must already contain your project (with apm.yml). ' +
@@ -112,10 +140,15 @@ export async function run(): Promise<void> {
     // 1. Install APM CLI (install + pack modes)
     await ensureApmInstalled();
 
-    // 2. Parse inputs
-    const depsInput = core.getInput('dependencies').trim();
+    // CLI-only mode: stop after installing the binary. The user will invoke
+    // apm themselves in subsequent steps (similar to setup-node, setup-python).
+    if (cliOnly) {
+      core.setOutput('success', 'true');
+      core.info('APM CLI installed (cli-only mode) — apm is now available on PATH');
+      return;
+    }
 
-    // 3. Handle isolated mode: clear existing primitives, generate apm.yml from inline deps only.
+    // 2. Handle isolated mode: clear existing primitives, generate apm.yml from inline deps only.
     //    Directory was already created above (actionOwnsDir = true for isolated mode).
     if (isolated) {
       if (!depsInput) {
@@ -147,9 +180,8 @@ export async function run(): Promise<void> {
       await runAuditReport(resolvedDir, auditReportPath);
     }
 
-    // 5. Run apm compile (opt-in)
-    const compile = core.getInput('compile') === 'true';
-    if (compile) {
+    // 3. Run apm compile (opt-in)
+    if (compileInput) {
       core.info('Compiling agent primitives...');
       await runApm(['compile'], resolvedDir);
     }
@@ -160,14 +192,13 @@ export async function run(): Promise<void> {
     core.setOutput('primitives-path', primitivesPath);
     await listDeployed(primitivesPath);
 
-    // 7. Optionally run a script
-    const script = core.getInput('script').trim();
-    if (script) {
-      core.info(`Running APM script: ${script}`);
-      await runApm(['run', script], resolvedDir);
+    // 4. Optionally run a script
+    if (scriptInput) {
+      core.info(`Running APM script: ${scriptInput}`);
+      await runApm(['run', scriptInput], resolvedDir);
     }
 
-    // 8. Pack mode: produce bundle after install
+    // 5. Pack mode: produce bundle after install
     if (packInput) {
       const target = core.getInput('target').trim() || undefined;
       const archive = core.getInput('archive') !== 'false';

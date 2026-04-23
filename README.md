@@ -12,6 +12,18 @@ A GitHub Action that installs [APM (Agent Package Manager)](https://github.com/m
 
 This installs the APM CLI, reads your `apm.yml`, and runs `apm install`.
 
+### CLI-only mode (install just the APM CLI)
+
+Install the APM CLI and stop — no `apm install`, no primitives, no bundle. The `apm` binary is added to `PATH` so you can invoke it yourself in later steps. Useful for ad-hoc commands, custom workflows, or composing APM with other tooling (similar to `setup-node`, `setup-python`, or `astral-sh/setup-uv`).
+
+```yaml
+- uses: microsoft/apm-action@v1
+  with:
+    cli-only: 'true'
+- run: apm --version
+- run: apm install some-org/some-package
+```
+
 ### With options
 
 ```yaml
@@ -173,6 +185,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 |---|---|---|---|
 | `working-directory` | No | `.` | Working directory for execution. Must exist in non-isolated mode (with your `apm.yml`). In `isolated`, `pack`, or `bundle` modes the directory is created automatically. |
 | `apm-version` | No | `latest` | APM version to install |
+| `cli-only` | No | `false` | Only install the APM CLI on the runner — skip `apm install` and all post-install steps. Cannot be combined with `dependencies`, `isolated`, `compile`, `script`, `pack`, `bundle`, or `audit-report`. |
 | `github-token` | No | `${{ github.token }}` | GitHub token for API calls. Auto-forwarded as `GITHUB_APM_PAT` so same-org private repos work with zero config. Pass a broader-scoped PAT for cross-org access. |
 | `script` | No | | APM script to run after install |
 | `dependencies` | No | | YAML array of extra dependencies to install (additive to apm.yml) |

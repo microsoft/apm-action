@@ -652,3 +652,97 @@ describe('run', () => {
     }
   });
 });
+
+describe('cli-only mode', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-action-clionly-'));
+    mockEnsureApmInstalled.mockResolvedValue(undefined);
+    mockExec.mockResolvedValue(0);
+    mockGetExecOutput.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('installs the CLI and stops — no apm install, no working-directory check', async () => {
+    // Intentionally point at a non-existent working directory: cli-only mode
+    // should not require it (mirrors setup-node / setup-python behavior).
+    const nonExistentDir = path.join(tmpDir, 'does-not-exist');
+
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return nonExistentDir;
+        case 'cli-only': return 'true';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    expect(mockEnsureApmInstalled).toHaveBeenCalledTimes(1);
+    // No apm subcommands should have been invoked
+    const apmCalls = (mockExec as jest.Mock).mock.calls.filter(
+      (c: unknown[]) => c[0] === 'apm',
+    );
+    expect(apmCalls).toHaveLength(0);
+    expect(mockSetOutput).toHaveBeenCalledWith('success', 'true');
+    // No primitives-path / bundle-path outputs in cli-only mode
+    expect(mockSetOutput).not.toHaveBeenCalledWith('primitives-path', expect.anything());
+    expect(mockSetOutput).not.toHaveBeenCalledWith('bundle-path', expect.anything());
+  });
+
+  it.each([
+    ['dependencies', { dependencies: '- microsoft/some-package' }],
+    ['isolated', { isolated: 'true' }],
+    ['compile', { compile: 'true' }],
+    ['script', { script: 'lint' }],
+    ['pack', { pack: 'true' }],
+    ['bundle', { bundle: './foo.tar.gz' }],
+    ['audit-report', { 'audit-report': 'true' }],
+  ])('fails fast when cli-only is combined with %s', async (conflict, extras) => {
+    mockGetInput.mockImplementation((name: unknown) => {
+      const inputs: Record<string, string> = {
+        'working-directory': tmpDir,
+        'cli-only': 'true',
+        ...extras,
+      };
+      return inputs[name as string] ?? '';
+    });
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining(conflict),
+    );
+    // CLI install must not have been attempted — we fail before that
+    expect(mockEnsureApmInstalled).not.toHaveBeenCalled();
+  });
+
+  it('cli-only: false (default) preserves existing install behavior', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: test\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'cli-only': return 'false';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    // Standard flow: ensureApmInstalled + apm install
+    expect(mockEnsureApmInstalled).toHaveBeenCalledTimes(1);
+    const installCall = (mockExec as jest.Mock).mock.calls.find(
+      (c: unknown[]) => c[0] === 'apm' && (c[1] as string[])?.[0] === 'install',
+    );
+    expect(installCall).toBeTruthy();
+  });
+});

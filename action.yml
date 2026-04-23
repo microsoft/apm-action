@@ -14,6 +14,10 @@ inputs:
     description: 'APM version to install (default: latest stable)'
     required: false
     default: 'latest'
+  cli-only:
+    description: 'Only install the APM CLI on the runner — skip apm install and all post-install steps. Useful when you want to invoke apm yourself in later steps (similar to setup-node, setup-python, etc.).'
+    required: false
+    default: 'false'
   script:
     description: 'APM script to run after install (optional — by default only install runs)'
     required: false
