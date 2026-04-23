@@ -698,7 +698,7 @@ describe('cli-only mode', () => {
 
   it.each([
     ['dependencies', { dependencies: '- microsoft/some-package' }],
-    ['isolated', { isolated: 'true', dependencies: '- microsoft/some-package' }],
+    ['isolated', { isolated: 'true' }],
     ['compile', { compile: 'true' }],
     ['script', { script: 'lint' }],
     ['pack', { pack: 'true' }],

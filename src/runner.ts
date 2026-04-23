@@ -26,6 +26,9 @@ export async function run(): Promise<void> {
     const packInput = core.getInput('pack') === 'true';
     const isolated = core.getInput('isolated') === 'true';
     const cliOnly = core.getInput('cli-only') === 'true';
+    const compileInput = core.getInput('compile') === 'true';
+    const scriptInput = core.getInput('script').trim();
+    const depsInput = core.getInput('dependencies').trim();
     const auditReportInput = core.getInput('audit-report').trim();
 
     // Pass github-token input to APM subprocess as GITHUB_TOKEN.
@@ -68,9 +71,9 @@ export async function run(): Promise<void> {
       if (bundleInput) conflicts.push('bundle');
       if (packInput) conflicts.push('pack');
       if (isolated) conflicts.push('isolated');
-      if (core.getInput('compile') === 'true') conflicts.push('compile');
-      if (core.getInput('script').trim()) conflicts.push('script');
-      if (core.getInput('dependencies').trim()) conflicts.push('dependencies');
+      if (compileInput) conflicts.push('compile');
+      if (scriptInput) conflicts.push('script');
+      if (depsInput) conflicts.push('dependencies');
       if (auditReportInput) conflicts.push('audit-report');
       if (conflicts.length > 0) {
         throw new Error(
@@ -145,10 +148,7 @@ export async function run(): Promise<void> {
       return;
     }
 
-    // 2. Parse inputs
-    const depsInput = core.getInput('dependencies').trim();
-
-    // 3. Handle isolated mode: clear existing primitives, generate apm.yml from inline deps only.
+    // 2. Handle isolated mode: clear existing primitives, generate apm.yml from inline deps only.
     //    Directory was already created above (actionOwnsDir = true for isolated mode).
     if (isolated) {
       if (!depsInput) {
@@ -180,9 +180,8 @@ export async function run(): Promise<void> {
       await runAuditReport(resolvedDir, auditReportPath);
     }
 
-    // 5. Run apm compile (opt-in)
-    const compile = core.getInput('compile') === 'true';
-    if (compile) {
+    // 3. Run apm compile (opt-in)
+    if (compileInput) {
       core.info('Compiling agent primitives...');
       await runApm(['compile'], resolvedDir);
     }
@@ -193,14 +192,13 @@ export async function run(): Promise<void> {
     core.setOutput('primitives-path', primitivesPath);
     await listDeployed(primitivesPath);
 
-    // 7. Optionally run a script
-    const script = core.getInput('script').trim();
-    if (script) {
-      core.info(`Running APM script: ${script}`);
-      await runApm(['run', script], resolvedDir);
+    // 4. Optionally run a script
+    if (scriptInput) {
+      core.info(`Running APM script: ${scriptInput}`);
+      await runApm(['run', scriptInput], resolvedDir);
     }
 
-    // 8. Pack mode: produce bundle after install
+    // 5. Pack mode: produce bundle after install
     if (packInput) {
       const target = core.getInput('target').trim() || undefined;
       const archive = core.getInput('archive') !== 'false';
