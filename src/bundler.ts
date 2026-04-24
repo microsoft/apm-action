@@ -77,9 +77,23 @@ export async function extractBundle(bundlePath: string, outputDir: string): Prom
     return { files, verified: true };
   }
 
-  // Fallback: tar extraction
+  // Fallback: tar extraction.
+  //
+  // Defense-in-depth: even if this path ever runs again (e.g. if a future
+  // change reintroduces a "skip apm install" mode, or apm install transiently
+  // fails), exclude the lockfile + manifest. They are bundle metadata, not
+  // deployable output — the same files that `apm unpack` (the primary path)
+  // intentionally never copies. Leaking them into a git checkout dirties the
+  // workspace and breaks downstream `git checkout` steps. See microsoft/apm-action#26.
   core.info('APM not available — extracting with tar (no verification)...');
-  const rc = await exec.exec('tar', ['xzf', resolvedBundle, '-C', resolvedOutput, '--strip-components=1'], {
+  const rc = await exec.exec('tar', [
+    'xzf', resolvedBundle,
+    '-C', resolvedOutput,
+    '--strip-components=1',
+    '--exclude=apm.lock.yaml',
+    '--exclude=apm.lock',
+    '--exclude=apm.yml',
+  ], {
     ignoreReturnCode: true,
   });
   if (rc !== 0) {

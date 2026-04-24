@@ -87,9 +87,30 @@ export async function run(): Promise<void> {
       }
     }
 
-    // RESTORE MODE: extract bundle, skip APM installation entirely.
+    // RESTORE MODE: install APM, then extract via `apm unpack`.
     // Directory was already created above (actionOwnsDir = true for bundle mode).
+    //
+    // Why install APM in restore mode (added in v1.5):
+    //   `apm unpack` honors the bundle contract — it copies only files listed in
+    //   the lockfile's `deployed_files` (primitives + apm_modules) and never
+    //   writes `apm.lock.yaml` / `apm.yml` to `working-directory`. The previous
+    //   "skip install" optimization forced extractBundle through its raw
+    //   `tar xzf --strip-components=1` fallback, which dumped the *entire*
+    //   bundle — including lockfile and apm.yml — into working-directory.
+    //   When working-directory was a git checkout (the default
+    //   `${{ github.workspace }}`), those tracked files became dirty and any
+    //   subsequent `git checkout` (e.g. gh-aw's pull_request_target PR-branch
+    //   checkout) aborted with:
+    //     error: Your local changes to the following files would be
+    //     overwritten by checkout: apm.lock.yaml
+    //   See microsoft/apm-action#26.
+    //
+    // The install is tool-cached (see installer.ts), so this adds at most a
+    // single small download per runner — negligible vs. the cost of a typical
+    // agent job, and we get bundle integrity verification for free.
     if (bundleInput) {
+      await ensureApmInstalled();
+
       const bundlePath = await resolveLocalBundle(bundleInput, resolvedDir);
       core.info(`Restoring bundle: ${bundlePath}`);
       const result = await extractBundle(bundlePath, resolvedDir);
