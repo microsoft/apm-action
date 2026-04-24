@@ -38,10 +38,13 @@ jest.unstable_mockModule('../installer.js', () => ({
   ensureApmInstalled: mockEnsureApmInstalled,
 }));
 
+const mockResolveLocalBundle = jest.fn<() => Promise<string>>();
+const mockExtractBundle = jest.fn<() => Promise<{ files: number; verified: boolean }>>();
+const mockRunPackStep = jest.fn<() => Promise<string>>();
 jest.unstable_mockModule('../bundler.js', () => ({
-  resolveLocalBundle: jest.fn(),
-  extractBundle: jest.fn(),
-  runPackStep: jest.fn(),
+  resolveLocalBundle: mockResolveLocalBundle,
+  extractBundle: mockExtractBundle,
+  runPackStep: mockRunPackStep,
 }));
 
 const { clearPrimitives, run } = await import('../runner.js');
@@ -650,5 +653,56 @@ describe('run', () => {
         process.env.GITHUB_APM_PAT = prevApmPat;
       }
     }
+  });
+});
+
+describe('run (restore mode)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-action-restore-'));
+    mockEnsureApmInstalled.mockResolvedValue(undefined);
+    mockExec.mockResolvedValue(0);
+    mockGetExecOutput.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    mockResolveLocalBundle.mockImplementation(async () => path.join(tmpDir, 'bundle.tar.gz'));
+    mockExtractBundle.mockResolvedValue({ files: 5, verified: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  // Regression test for microsoft/apm-action#26.
+  // Before the fix, restore mode deliberately skipped ensureApmInstalled() for
+  // speed, which forced extractBundle through its raw `tar xzf` fallback and
+  // dumped the bundle's apm.lock.yaml / apm.yml into working-directory. That
+  // dirtied any git checkout consumers (e.g. gh-aw pull_request_target flows)
+  // and broke their subsequent `git checkout` step. Restore mode must always
+  // install APM so extractBundle takes the verified `apm unpack` path.
+  it('installs APM before extracting (so apm unpack is used, not the tar fallback)', async () => {
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'bundle': return './bundle.tar.gz';
+        case 'isolated': return 'false';
+        case 'pack': return 'false';
+        case 'compile': return 'false';
+        case 'script': return '';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    expect(mockEnsureApmInstalled).toHaveBeenCalledTimes(1);
+    expect(mockExtractBundle).toHaveBeenCalledTimes(1);
+
+    // Order matters: install must complete before extract starts so apm unpack
+    // is on PATH when extractBundle probes for it.
+    const installOrder = mockEnsureApmInstalled.mock.invocationCallOrder[0];
+    const extractOrder = mockExtractBundle.mock.invocationCallOrder[0];
+    expect(installOrder).toBeLessThan(extractOrder);
   });
 });

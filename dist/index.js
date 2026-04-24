@@ -41139,9 +41139,23 @@ async function extractBundle(bundlePath, outputDir) {
         const files = countDeployedFiles(resolvedOutput);
         return { files, verified: true };
     }
-    // Fallback: tar extraction
+    // Fallback: tar extraction.
+    //
+    // Defense-in-depth: even if this path ever runs again (e.g. if a future
+    // change reintroduces a "skip apm install" mode, or apm install transiently
+    // fails), exclude the lockfile + manifest. They are bundle metadata, not
+    // deployable output — the same files that `apm unpack` (the primary path)
+    // intentionally never copies. Leaking them into a git checkout dirties the
+    // workspace and breaks downstream `git checkout` steps. See microsoft/apm-action#26.
     info('APM not available — extracting with tar (no verification)...');
-    const rc = await exec_exec('tar', ['xzf', resolvedBundle, '-C', resolvedOutput, '--strip-components=1'], {
+    const rc = await exec_exec('tar', [
+        'xzf', resolvedBundle,
+        '-C', resolvedOutput,
+        '--strip-components=1',
+        '--exclude=apm.lock.yaml',
+        '--exclude=apm.lock',
+        '--exclude=apm.yml',
+    ], {
         ignoreReturnCode: true,
     });
     if (rc !== 0) {
@@ -41325,13 +41339,39 @@ async function run() {
                 auditReportPath = external_path_.resolve(resolvedDir, auditReportInput);
             }
         }
-        // RESTORE MODE: extract bundle, skip APM installation entirely.
+        // RESTORE MODE: install APM, then extract via `apm unpack`.
         // Directory was already created above (actionOwnsDir = true for bundle mode).
+        //
+        // Why install APM in restore mode:
+        //   `apm unpack` honors the bundle contract — it copies only files listed in
+        //   the lockfile's `deployed_files` (primitives + apm_modules) and never
+        //   writes `apm.lock.yaml` / `apm.yml` to `working-directory`. The previous
+        //   "skip install" optimization forced extractBundle through its raw
+        //   `tar xzf --strip-components=1` fallback, which dumped the *entire*
+        //   bundle — including lockfile and apm.yml — into working-directory.
+        //   When working-directory was a git checkout (the default
+        //   `${{ github.workspace }}`), those tracked files became dirty and any
+        //   subsequent `git checkout` (e.g. gh-aw's pull_request_target PR-branch
+        //   checkout) aborted with:
+        //     error: Your local changes to the following files would be
+        //     overwritten by checkout: apm.lock.yaml
+        //   See microsoft/apm-action#26.
+        //
+        // The install is tool-cached (see installer.ts), so this adds at most a
+        // single small download per runner — negligible vs. the cost of a typical
+        // agent job, and we get bundle integrity verification for free.
         if (bundleInput) {
+            await ensureApmInstalled();
             const bundlePath = await resolveLocalBundle(bundleInput, resolvedDir);
             info(`Restoring bundle: ${bundlePath}`);
             const result = await extractBundle(bundlePath, resolvedDir);
-            const verifiedMsg = result.verified ? ' (verified)' : ' (unverified — install APM for integrity checks)';
+            // Restore mode now installs APM up-front, so the verified `apm unpack`
+            // path is the expected outcome. The unverified branch only runs if APM
+            // install failed transiently and extractBundle fell through to its tar
+            // fallback — point operators at the install logs, not at re-installing.
+            const verifiedMsg = result.verified
+                ? ' (verified)'
+                : ' (unverified — APM install did not complete; see earlier install logs)';
             info(`Restored ${result.files} file(s)${verifiedMsg}`);
             const primitivesPath = external_path_.join(resolvedDir, '.github');
             setOutput('primitives-path', primitivesPath);

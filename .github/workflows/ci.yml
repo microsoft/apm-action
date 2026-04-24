@@ -250,9 +250,131 @@ jobs:
           fi
           echo "✅ Restore mode: primitives restored from bundle"
 
+  # Integration: regression test for microsoft/apm-action#26.
+  #
+  # Reproduces the gh-aw pull_request_target scenario: when the workflow
+  # checkout is the base branch and the triggering PR modifies apm.lock.yaml,
+  # the post-restore `git checkout <pr-sha> -- .` must succeed. Before the fix
+  # it failed with `error: Your local changes to the following files would be
+  # overwritten by checkout: apm.lock.yaml`, because the action's tar fallback
+  # had dumped the bundle's apm.lock.yaml on top of the tracked one.
+  #
+  # The check has two halves:
+  #   (1) `git status` after restore must show no modifications to apm.lock.yaml
+  #       or apm.yml. apm unpack writes only files listed in the lockfile's
+  #       `deployed_files` -- not the lockfile or manifest themselves.
+  #   (2) A git checkout to a different ref must succeed without conflict.
+  test-restore-clean-workspace:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create test apm.yml + commit a baseline lockfile
+        run: |
+          # Configure git identity so we can commit in the runner.
+          git config user.email "ci@apm-action.local"
+          git config user.name "apm-action ci"
+
+          # Create a throwaway branch so we can manipulate tracked files
+          # without touching the PR source.
+          git checkout -b ci/restore-clean-workspace-test
+
+          cat > apm.yml << 'EOF'
+          name: ci-test-restore-clean
+          version: 1.0.0
+          dependencies:
+            apm:
+              - microsoft/apm-sample-package
+          EOF
+
+          # Commit a placeholder apm.lock.yaml so it is *tracked* by git.
+          # This is the precondition that makes the bug fire: the file in
+          # working-directory is tracked, so any extraneous write to it
+          # surfaces in `git status` and blocks subsequent `git checkout`.
+          cat > apm.lock.yaml << 'EOF'
+          # placeholder lockfile - replaced by pack step below
+          version: 1
+          packages: {}
+          EOF
+          git add apm.yml apm.lock.yaml
+          git commit -m "test fixture: tracked apm.yml + apm.lock.yaml" --quiet
+
+          # Capture the SHA of the "tracked baseline" so we can git-checkout
+          # back to it after restore -- this is the operation that breaks if
+          # restore dirties the tracked files.
+          BASELINE_SHA=$(git rev-parse HEAD)
+          echo "BASELINE_SHA=$BASELINE_SHA" >> "$GITHUB_ENV"
+
+      - name: Pack bundle
+        id: pack
+        uses: ./
+        with:
+          pack: 'true'
+          target: 'vscode'
+
+      - name: Stash bundle and reset workspace to the tracked baseline
+        run: |
+          # Move the bundle out of the workspace so subsequent git operations
+          # don't see it.
+          mkdir -p /tmp/apm-bundle
+          cp "${{ steps.pack.outputs.bundle-path }}" /tmp/apm-bundle/
+
+          # Reset to the tracked baseline so we are testing restore against a
+          # clean git state with apm.lock.yaml + apm.yml *tracked*.
+          rm -rf .github/instructions .github/agents .github/skills .github/prompts apm_modules build
+          git checkout -- .
+          git clean -fd
+          test -z "$(git status --porcelain)" || {
+            echo "::error::pre-restore workspace is dirty: $(git status --porcelain)"; exit 1; }
+
+      - name: Test - restore bundle into the tracked git checkout
+        uses: ./
+        with:
+          bundle: '/tmp/apm-bundle/*.tar.gz'
+
+      - name: Assert apm.lock.yaml + apm.yml were NOT modified by restore
+        run: |
+          # Restore must not touch tracked metadata files. If `git status` shows
+          # apm.lock.yaml or apm.yml as modified, the action is leaking bundle
+          # metadata into working-directory -- the exact bug from #26.
+          DIRTY_META=$(git status --porcelain apm.lock.yaml apm.yml)
+          if [ -n "$DIRTY_META" ]; then
+            echo "::error::Restore modified tracked apm metadata files (#26 regression):"
+            echo "$DIRTY_META"
+            echo
+            echo "--- diff ---"
+            git --no-pager diff apm.lock.yaml apm.yml
+            exit 1
+          fi
+          echo "✅ apm.lock.yaml and apm.yml are pristine after restore"
+
+      - name: Assert primitives WERE deployed
+        run: |
+          if ! find .github -type f \( -name "*.instructions.md" -o -name "*.agent.md" -o -name "*.prompt.md" -o -name "SKILL.md" \) | grep -q .; then
+            echo "::error::No primitives found after restore"
+            exit 1
+          fi
+          echo "✅ Primitives deployed under .github/"
+
+      - name: Assert subsequent git checkout succeeds (the actual #26 symptom)
+        run: |
+          # This is the operation that originally failed in the gh-aw flow:
+          # `git checkout <pr-sha> -- .` after the action ran. We replay it here
+          # by checking out the tracked baseline. Before the fix this aborted
+          # with "Your local changes to the following files would be overwritten
+          # by checkout: apm.lock.yaml". After the fix it must succeed cleanly.
+          if ! git checkout "$BASELINE_SHA" -- . 2>checkout.err; then
+            echo "::error::git checkout failed after restore -- this is the #26 regression"
+            cat checkout.err
+            exit 1
+          fi
+          echo "✅ Post-restore git checkout succeeded (no #26 regression)"
+
   # Release: update major version tag (v1 → v1.x.x)
   release:
-    needs: [build, test-manifest, test-isolated, test-compile, test-pack, test-restore-artifact]
+    needs: [build, test-manifest, test-isolated, test-compile, test-pack, test-restore-artifact, test-restore-clean-workspace]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 5

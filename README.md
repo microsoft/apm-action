@@ -58,9 +58,9 @@ Install dependencies, scan for hidden Unicode threats, and pack into a self-cont
 
 This works with all modes — `isolated`, inline `dependencies`, or from `apm.yml`.
 
-### Restore mode (zero-install)
+### Restore mode (verified extraction)
 
-Restore primitives from a bundle — no APM installation, no Python, no network. If APM happens to be on PATH, it uses `apm unpack` for integrity verification; otherwise it falls back to `tar xzf`.
+Restore primitives from a bundle. The action installs APM (cached across runs) and uses `apm unpack` for integrity verification — no Python, minimal network. Only files listed in the bundle's lockfile (`deployed_files`) are written to `working-directory`; the lockfile and `apm.yml` themselves are not, so the workspace stays clean for downstream steps such as `git checkout`.
 
 ```yaml
 - uses: actions/download-artifact@v4
@@ -179,7 +179,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | `isolated` | No | `false` | Ignore apm.yml and clear pre-existing primitive dirs — install only inline dependencies |
 | `compile` | No | `false` | Run `apm compile` after install to generate AGENTS.md |
 | `pack` | No | `false` | Pack a bundle after install (produces `.tar.gz` by default) |
-| `bundle` | No | | Restore from a bundle (local path or glob). Skips APM installation entirely. |
+| `bundle` | No | | Restore from a bundle (local path or glob). Installs APM and unpacks via `apm unpack` (verified). |
 | `target` | No | | Bundle target: `copilot`, `vscode`, `claude`, or `all` (used with `pack: true`) |
 | `archive` | No | `true` | Produce `.tar.gz` instead of directory (used with `pack: true`) |
 | `audit-report` | No | | Generate a SARIF audit report (hidden Unicode scanning). `apm install` already blocks critical findings; this adds reporting for Code Scanning and a markdown summary in `$GITHUB_STEP_SUMMARY`. Set to `true` for default path, or provide a custom path. |

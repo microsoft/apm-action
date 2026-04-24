@@ -141,6 +141,15 @@ describe('extractBundle', () => {
     const tarCall = mockExec.mock.calls.find(c => c[0] === 'tar');
     expect(tarCall).toBeTruthy();
     expect(tarCall![1]).toContain('--strip-components=1');
+
+    // Defense-in-depth (microsoft/apm-action#26): even if the tar fallback
+    // ever runs, it must NOT extract apm.lock.yaml or apm.yml into the output
+    // dir. Those are bundle metadata, never deployable output, and writing
+    // them to a git checkout dirties the workspace and breaks downstream
+    // `git checkout` steps.
+    expect(tarCall![1]).toContain('--exclude=apm.lock.yaml');
+    expect(tarCall![1]).toContain('--exclude=apm.lock');
+    expect(tarCall![1]).toContain('--exclude=apm.yml');
   });
 
   it('throws when bundle file does not exist', async () => {
