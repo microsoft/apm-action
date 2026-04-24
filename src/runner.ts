@@ -90,7 +90,7 @@ export async function run(): Promise<void> {
     // RESTORE MODE: install APM, then extract via `apm unpack`.
     // Directory was already created above (actionOwnsDir = true for bundle mode).
     //
-    // Why install APM in restore mode (added in v1.5):
+    // Why install APM in restore mode:
     //   `apm unpack` honors the bundle contract — it copies only files listed in
     //   the lockfile's `deployed_files` (primitives + apm_modules) and never
     //   writes `apm.lock.yaml` / `apm.yml` to `working-directory`. The previous
@@ -114,7 +114,13 @@ export async function run(): Promise<void> {
       const bundlePath = await resolveLocalBundle(bundleInput, resolvedDir);
       core.info(`Restoring bundle: ${bundlePath}`);
       const result = await extractBundle(bundlePath, resolvedDir);
-      const verifiedMsg = result.verified ? ' (verified)' : ' (unverified — install APM for integrity checks)';
+      // Restore mode now installs APM up-front, so the verified `apm unpack`
+      // path is the expected outcome. The unverified branch only runs if APM
+      // install failed transiently and extractBundle fell through to its tar
+      // fallback — point operators at the install logs, not at re-installing.
+      const verifiedMsg = result.verified
+        ? ' (verified)'
+        : ' (unverified — APM install did not complete; see earlier install logs)';
       core.info(`Restored ${result.files} file(s)${verifiedMsg}`);
 
       const primitivesPath = path.join(resolvedDir, '.github');
