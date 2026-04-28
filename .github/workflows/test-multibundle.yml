@@ -21,21 +21,36 @@ jobs:
 
       - name: Create throwaway APM project
         run: |
-          mkdir -p /tmp/apm-test-${{ matrix.org }}/.github/skills/skill-${{ matrix.org }}
+          PROJ=/tmp/apm-test-${{ matrix.org }}
+          mkdir -p "$PROJ/.github/skills/skill-${{ matrix.org }}"
 
-          cat > /tmp/apm-test-${{ matrix.org }}/apm.yml <<'YAML'
+          cat > "$PROJ/apm.yml" <<'YAML'
           name: test-${{ matrix.org }}
           version: 1.0.0
+          description: throwaway fixture for multi-bundle CI
           dependencies:
             apm: []
+            mcp: []
           YAML
 
-          cat > /tmp/apm-test-${{ matrix.org }}/.github/skills/skill-${{ matrix.org }}/SKILL.md <<'MD'
+          cat > "$PROJ/.github/skills/skill-${{ matrix.org }}/SKILL.md" <<'MD'
           ---
           name: skill-${{ matrix.org }}
+          description: Skill from org ${{ matrix.org }}
           ---
           # Skill from org ${{ matrix.org }}
           MD
+
+          # apm install with no remote deps does not auto-create a lockfile,
+          # but apm pack requires one. Pre-seed a minimal valid lockfile that
+          # declares the local primitive as a deployed file.
+          cat > "$PROJ/apm.lock.yaml" <<'YAML'
+          lockfile_version: '1'
+          generated_at: '2026-04-28T00:00:00+00:00'
+          dependencies: []
+          local_deployed_files:
+            - .github/skills/skill-${{ matrix.org }}/SKILL.md
+          YAML
 
       - name: Pack bundle
         uses: ./
