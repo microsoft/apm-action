@@ -72,12 +72,15 @@ Restore primitives from a bundle. The action installs APM (cached across runs) a
     bundle: './*.tar.gz'
 ```
 
-### Multi-bundle restore (multi-org)
+<a id="multi-bundle-restore"></a>
+### Multi-bundle restore (multi-org / multi-app)
 
-Restore primitives from multiple bundles into a single workspace. Used with matrix-based workflows where each matrix replica produces a separate bundle artifact (for example, one bundle per GitHub App / per organization):
+**Why:** when you fan out a `pack` job across N GitHub Apps (or N orgs, or N teams) you end up with N separate bundle artifacts. Without `bundles-file`, the consumer job has to call `microsoft/apm-action@v1` N times in sequence, which adds latency and obscures which install came from which source. `bundles-file` lets a single restore step merge all N bundles into one workspace in caller-specified order. See [issue #29](https://github.com/microsoft/apm-action/issues/29) for the full rationale and diagrams.
+
+**Backward compatibility:** existing single-`bundle` callers are unaffected. `bundles-file` is a new opt-in input; `pack`, `bundle`, and `bundles-file` are mutually exclusive (the action errors if more than one is set).
 
 ```yaml
-# In your agent job, after downloading all bundle artifacts:
+# In a downstream job that consumes all bundles:
 - uses: actions/download-artifact@v4
   with:
     pattern: apm-*
@@ -91,10 +94,12 @@ Restore primitives from multiple bundles into a single workspace. Used with matr
     bundles-file: /tmp/bundle-list.txt
     working-directory: /tmp/agent-workspace
 
-# ${{ steps.restore.outputs.bundles-restored }} == number of bundles restored
+- run: echo "Merged ${{ steps.restore.outputs.bundles-restored }} bundles into the workspace"
 ```
 
-Bundles are restored in the order listed (last wins on file collisions). The `bundles-file` input is mutually exclusive with `pack` and `bundle`. See [issue #29](https://github.com/microsoft/apm-action/issues/29) for the architecture rationale.
+The `bundles-restored` output reports the integer count of bundles successfully merged, which is convenient for assertions and logging in downstream steps.
+
+**Collision policy:** bundles are applied in list order; on file conflicts, later bundles overwrite earlier bundles. The action logs an explicit warning naming the bundle count before the restore loop begins, so the policy is never silent. Per-file SHA-aware collision detection is planned for v1.6.0.
 
 ### Cross-job artifact workflow
 
@@ -177,7 +182,7 @@ For cross-org private repos, pass a PAT with broader scope via the `github-token
     github-token: ${{ secrets.APM_PAT }}
 ```
 
-For multi-org or multi-platform scenarios, use the `env:` block for full control. An explicit `GITHUB_APM_PAT` in `env:` always wins over the auto-forwarded value:
+For multi-org or multi-platform scenarios, use the `env:` block for full control. An explicit `GITHUB_APM_PAT` in `env:` always wins over the auto-forwarded value. (For the matrix-based fan-out pattern that pairs one App per matrix replica with [`bundles-file:`](#multi-bundle-restore), see [issue #29](https://github.com/microsoft/apm-action/issues/29).)
 
 ```yaml
 # Multi-org / multi-platform: full control via env block

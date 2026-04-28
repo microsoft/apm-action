@@ -7,11 +7,27 @@ import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as path from 'path';
 
-/** Env-var denylist stripped from the apm unpack subprocess (B7). */
+/**
+ * Env-var denylist stripped from the apm unpack subprocess (B7).
+ *
+ * Includes:
+ * - APM-recognised credentials: GITHUB_APM_PAT, ADO_APM_PAT.
+ * - GitHub CLI / Actions token aliases that APM may auto-detect now or in
+ *   future releases: GITHUB_TOKEN, GH_TOKEN.
+ * - Runner-scoped tokens with high blast radius if exfiltrated by a malicious
+ *   bundle's hypothetical lifecycle hook: ACTIONS_RUNTIME_TOKEN (cache write),
+ *   ACTIONS_ID_TOKEN_REQUEST_TOKEN (OIDC federation).
+ *
+ * Defence-in-depth: `apm unpack` itself does not need any of these, and the
+ * restore-side multi-bundle path performs no authenticated network calls.
+ */
 export const TOKEN_ENV_DENYLIST: readonly string[] = [
   'GITHUB_APM_PAT',
   'ADO_APM_PAT',
   'GITHUB_TOKEN',
+  'GH_TOKEN',
+  'ACTIONS_RUNTIME_TOKEN',
+  'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
 ];
 
 /** Default cap on the number of bundles a single list file may contain (B5). */
@@ -63,7 +79,14 @@ export interface RestoreResult {
  * hooks (if any are ever introduced) cannot exfiltrate the runner's auth.
  */
 export function buildStrippedEnv(): Record<string, string> {
-  const env = { ...process.env } as Record<string, string>;
+  // process.env is Record<string, string | undefined>. Filter undefined-valued
+  // entries up-front so the returned record is genuinely Record<string, string>
+  // without an unsafe `as` cast that hides the underlying type mismatch.
+  const env: Record<string, string> = Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] => entry[1] !== undefined,
+    ),
+  );
   for (const key of TOKEN_ENV_DENYLIST) {
     delete env[key];
   }
@@ -81,6 +104,9 @@ export function buildStrippedEnv(): Record<string, string> {
  * - '..' segment in any path -> reject with line number (B3).
  * - Relative paths resolved against opts.workspaceDir; rejected if they escape it (B1).
  * - Absolute paths allowed (matches existing bundle: behaviour, B1).
+ * - Each entry must end in `.tar.gz` (defence-in-depth + clear early failure
+ *   if a user accidentally points at a directory or wrong file). Glob patterns
+ *   are NOT expanded; use `find ... | sort` to generate the list yourself.
  * - Empty list after stripping -> hard error.
  * - Duplicates deduped silently (first occurrence wins).
  * - Cap at opts.maxBundles (default 64, env APM_MAX_BUNDLES) (B5).
@@ -142,6 +168,16 @@ export function parseBundleListFile(filePath: string, opts?: ParseOptions): stri
       );
     }
 
+    // Require .tar.gz extension. Globs are not expanded; bare paths only.
+    // Catches mis-configured list files (typo, directory, or wildcard left
+    // unexpanded) at parse time rather than surfacing as a confusing tar error.
+    if (!trimmed.toLowerCase().endsWith('.tar.gz')) {
+      throw new Error(
+        `bundles-file line ${lineNum}: entry must end in '.tar.gz' `
+        + `(globs are not expanded; use find or ls to generate the list): ${trimmed}`,
+      );
+    }
+
     const isAbs = path.isAbsolute(trimmed);
     const resolved = isAbs ? path.resolve(trimmed) : path.resolve(resolvedWorkspace, trimmed);
 
@@ -178,10 +214,15 @@ export function parseBundleListFile(filePath: string, opts?: ParseOptions): stri
 /**
  * Preview file collisions across N bundles without extracting.
  *
- * NOTE: Stubbed for v1 -- returns an empty CollisionReport. Full implementation
- * (which would shell out to `apm unpack --dry-run` and aggregate file lists
- * across bundles) is deferred to a follow-up PR. The restore loop is not
- * blocked on this; collisions are still resolved by last-wins overwrite.
+ * NOTE: Stubbed for v1.5.0 -- returns an empty CollisionReport. Full
+ * implementation (which would shell out to `apm unpack --dry-run` and
+ * aggregate file lists across bundles, distinguishing same-SHA from
+ * different-SHA overlaps) is planned for v1.6.0. The restore loop is NOT
+ * blocked on this; the policy is documented up-front via
+ * `logCollisionPolicy()` so users are not surprised by silent overwrites.
+ *
+ * The function is wired into the runner today so its call site is real,
+ * not dead code -- the v1.6.0 follow-up only swaps the implementation.
  */
 export async function previewBundleFiles(
   bundles: string[],
@@ -189,6 +230,22 @@ export async function previewBundleFiles(
   void bundles;
   core.debug('previewBundleFiles: dry-run aggregation not yet implemented; returning empty report');
   return { sameSha: [], differentSha: [] };
+}
+
+/**
+ * Emit a single, explicit policy banner BEFORE the restore loop runs so the
+ * user is never surprised by silent overwrites. No-op for the single-bundle
+ * case (no possible collisions). Intentionally `core.warning` not `core.info`
+ * so it is annotated visibly in the GitHub Actions summary.
+ */
+export function logCollisionPolicy(bundleCount: number): void {
+  if (bundleCount <= 1) return;
+  core.warning(
+    `Multi-bundle restore: ${bundleCount} bundles will be applied in list order. `
+    + `On file conflicts, later bundles overwrite earlier bundles silently. `
+    + `Per-file SHA collision detection is planned for v1.6.0. `
+    + `Until then, ensure the bundle list is in your intended precedence order.`,
+  );
 }
 
 /**
@@ -247,6 +304,10 @@ export async function restoreMultiBundles(
         + (tail ? `\nstderr:\n${tail}` : ''),
       );
     }
+
+    // Per-bundle confirmation so a stalled run is debuggable from the log
+    // alone without re-reading the surrounding 'Unpacking' lines.
+    core.info(`[${human}] OK`);
   }
 
   return {

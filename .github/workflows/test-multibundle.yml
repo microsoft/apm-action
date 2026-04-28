@@ -41,6 +41,12 @@ jobs:
             mcp: []
           YAML
 
+          # Per-org marker file proves the matrix replicas are genuinely
+          # independent; if the multi-bundle restore later merges all 3,
+          # all 3 marker files must coexist in the merged workspace.
+          mkdir -p "$PROJ/.github/markers"
+          echo "org=${{ matrix.org }}" > "$PROJ/.github/markers/${{ matrix.org }}.txt"
+
       - name: Pack bundle
         uses: ./
         with:
@@ -112,3 +118,46 @@ jobs:
             exit 1
           fi
           echo "OK: bundles-restored=3"
+
+      - name: Assert per-org marker files all coexist (proves true merge)
+        run: |
+          # Each pack job wrote a unique marker file under .github/markers/.
+          # After multi-bundle restore, all 3 must be present in the merged
+          # workspace, proving the loop is genuinely additive across replicas.
+          for ORG in alpha beta gamma; do
+            if [ ! -f "/tmp/restore-target/.github/markers/${ORG}.txt" ]; then
+              echo "FAIL: missing marker for org=${ORG}"
+              ls -la /tmp/restore-target/.github/markers/ || true
+              exit 1
+            fi
+          done
+          echo "OK: all 3 per-org marker files present in merged workspace"
+
+  reject-traversal:
+    name: 'Negative test: bundles-file rejects .. traversal'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate bundles-file with rejected '..' segment
+        run: |
+          mkdir -p /tmp/neg-bundles
+          cat > /tmp/neg-bundle-list.txt <<'EOF'
+          ../escape.tar.gz
+          EOF
+
+      - name: Restore must FAIL on traversal
+        id: restore-neg
+        continue-on-error: true
+        uses: ./
+        with:
+          bundles-file: /tmp/neg-bundle-list.txt
+          working-directory: /tmp/neg-restore-target
+
+      - name: Assert step failed (traversal rejected)
+        run: |
+          if [ "${{ steps.restore-neg.outcome }}" != "failure" ]; then
+            echo "FAIL: expected restore step to fail on '..' traversal, got outcome=${{ steps.restore-neg.outcome }}"
+            exit 1
+          fi
+          echo "OK: '..' traversal in bundles-file was rejected as required"

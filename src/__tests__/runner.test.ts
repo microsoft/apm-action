@@ -754,7 +754,10 @@ describe('3-way mutex (pack / bundle / bundles-file)', () => {
     mockGetInput.mockImplementation(inputs({ pack: 'true', bundle: './x.tar.gz' }));
     await run();
     expect(mockSetFailed).toHaveBeenCalledWith(
-      expect.stringContaining('specify exactly one of: pack, bundle, bundles-file'),
+      expect.stringContaining('mutually exclusive'),
+    );
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('pack, bundle'),
     );
   });
 
@@ -762,7 +765,10 @@ describe('3-way mutex (pack / bundle / bundles-file)', () => {
     mockGetInput.mockImplementation(inputs({ pack: 'true', 'bundles-file': '/tmp/list.txt' }));
     await run();
     expect(mockSetFailed).toHaveBeenCalledWith(
-      expect.stringContaining('specify exactly one of: pack, bundle, bundles-file'),
+      expect.stringContaining('mutually exclusive'),
+    );
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('pack, bundles-file'),
     );
   });
 
@@ -770,7 +776,10 @@ describe('3-way mutex (pack / bundle / bundles-file)', () => {
     mockGetInput.mockImplementation(inputs({ bundle: './x.tar.gz', 'bundles-file': '/tmp/list.txt' }));
     await run();
     expect(mockSetFailed).toHaveBeenCalledWith(
-      expect.stringContaining('specify exactly one of: pack, bundle, bundles-file'),
+      expect.stringContaining('mutually exclusive'),
+    );
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('bundle, bundles-file'),
     );
   });
 

@@ -41522,7 +41522,8 @@ async function run() {
             bundlesFileInput && 'bundles-file',
         ].filter(Boolean);
         if (modeFlags.length > 1) {
-            throw new Error(`specify exactly one of: pack, bundle, bundles-file (got: ${modeFlags.join(', ')})`);
+            throw new Error(`inputs 'pack', 'bundle', and 'bundles-file' are mutually exclusive `
+                + `(got: ${modeFlags.join(', ')}). Pick exactly one mode per step.`);
         }
         // Directory creation contract:
         //   - isolated / pack / bundle (restore) modes: the action owns the workspace
@@ -41597,14 +41598,32 @@ async function run() {
         }
         // MULTI-BUNDLE RESTORE MODE
         if (bundlesFileInput) {
-            const { parseBundleListFile, restoreMultiBundles } = await __nccwpck_require__.e(/* import() */ 970).then(__nccwpck_require__.bind(__nccwpck_require__, 2970));
+            const { parseBundleListFile, previewBundleFiles, logCollisionPolicy, restoreMultiBundles, } = await __nccwpck_require__.e(/* import() */ 970).then(__nccwpck_require__.bind(__nccwpck_require__, 2970));
             const bundles = parseBundleListFile(bundlesFileInput, {
                 workspaceDir: resolvedDir,
             });
             lib_core/* info */.pq(`Multi-bundle restore: ${bundles.length} bundle(s) from ${bundlesFileInput}`);
+            // Surface the collision policy BEFORE any work happens so users are
+            // never surprised by silent overwrites. Wired to previewBundleFiles
+            // so the call site is real today; per-file SHA collision detection
+            // ships in v1.6.0 (currently a no-op stub).
+            logCollisionPolicy(bundles.length);
+            const preview = await previewBundleFiles(bundles);
+            if (preview.differentSha.length > 0) {
+                lib_core/* warning */.$e(`Detected ${preview.differentSha.length} different-content collision(s) `
+                    + `across bundles. Later bundles in the list will win.`);
+            }
+            if (preview.sameSha.length > 0) {
+                lib_core/* info */.pq(`Detected ${preview.sameSha.length} byte-identical file overlap(s) `
+                    + `across bundles (benign duplicates).`);
+            }
+            // ensureApmInstalled() runs the install pipeline; restoreMultiBundles
+            // additionally probes `apm --version` as a defence-in-depth check so
+            // a transient install failure surfaces with a clear error before the
+            // first unpack rather than as a generic ENOENT mid-loop.
             await ensureApmInstalled();
             const result = await restoreMultiBundles(bundles, resolvedDir);
-            lib_core/* info */.pq(`Restored ${result.count} bundle(s) successfully`);
+            lib_core/* info */.pq(`Restored ${result.count} bundle(s) successfully into ${resolvedDir}`);
             const primitivesPath = external_path_.join(resolvedDir, '.github');
             lib_core/* setOutput */.uH('primitives-path', primitivesPath);
             lib_core/* setOutput */.uH('bundles-restored', String(result.count));

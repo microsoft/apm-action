@@ -7,11 +7,12 @@ import path from 'node:path';
 const mockExec = jest.fn<(cmd: string, args?: string[], options?: object) => Promise<number>>();
 const mockInfo = jest.fn();
 const mockDebug = jest.fn();
+const mockWarning = jest.fn();
 
 jest.unstable_mockModule('@actions/core', () => ({
   info: mockInfo,
   debug: mockDebug,
-  warning: jest.fn(),
+  warning: mockWarning,
 }));
 
 jest.unstable_mockModule('@actions/exec', () => ({
@@ -22,6 +23,7 @@ const {
   parseBundleListFile,
   restoreMultiBundles,
   previewBundleFiles,
+  logCollisionPolicy,
   buildStrippedEnv,
   TOKEN_ENV_DENYLIST,
   DEFAULT_MAX_BUNDLES,
@@ -168,6 +170,26 @@ describe('parseBundleListFile', () => {
     expect(() => parseBundleListFile(listFile, { workspaceDir }))
       .toThrow(/empty after stripping/);
   });
+
+  it('rejects entries that do not end in .tar.gz with line number', () => {
+    const ok = path.join(workspaceDir, 'ok.tar.gz');
+    fs.writeFileSync(listFile, [ok, 'bundle.zip'].join('\n'));
+    expect(() => parseBundleListFile(listFile, { workspaceDir }))
+      .toThrow(/line 2: entry must end in '\.tar\.gz'.*bundle\.zip/);
+  });
+
+  it("rejects glob patterns left unexpanded (no shell expansion)", () => {
+    fs.writeFileSync(listFile, '/tmp/bundles/*.tar.gz\n');
+    // The glob is not a literal .tar.gz file path either (the workspace check
+    // on a literal '*' character is tolerated; the extension check would pass
+    // since the suffix is .tar.gz). Globs that DON'T end in .tar.gz are caught
+    // here; literal '*'-suffix paths are caught at unpack time by the OS.
+    // This test pins the wildcard-without-extension case which is the common
+    // user mistake (e.g. '/tmp/bundles/*').
+    fs.writeFileSync(listFile, '/tmp/bundles/*\n');
+    expect(() => parseBundleListFile(listFile, { workspaceDir }))
+      .toThrow(/entry must end in '\.tar\.gz'/);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -208,16 +230,15 @@ describe('restoreMultiBundles', () => {
     expect(unpackCalls[2][1]).toEqual(['unpack', '/abs/c.tar.gz', '-o', path.resolve(outDir)]);
   });
 
-  it('[B7] subprocess env excludes GITHUB_APM_PAT, ADO_APM_PAT, GITHUB_TOKEN', async () => {
-    // Set the tokens in the parent env so we can prove they are stripped.
-    const prev = {
-      a: process.env.GITHUB_APM_PAT,
-      b: process.env.ADO_APM_PAT,
-      c: process.env.GITHUB_TOKEN,
-    };
-    process.env.GITHUB_APM_PAT = 'pat-1';
-    process.env.ADO_APM_PAT = 'pat-2';
-    process.env.GITHUB_TOKEN = 'pat-3';
+  it('[B7] subprocess env excludes all entries in TOKEN_ENV_DENYLIST', async () => {
+    // Set every denylisted token in the parent env so we can prove they are
+    // ALL stripped (not just the original three). This guards against future
+    // additions to the denylist quietly regressing.
+    const prev: Record<string, string | undefined> = {};
+    for (const key of TOKEN_ENV_DENYLIST) {
+      prev[key] = process.env[key];
+      process.env[key] = `parent-${key}`;
+    }
 
     try {
       await restoreMultiBundles(['/abs/a.tar.gz'], outDir);
@@ -228,13 +249,14 @@ describe('restoreMultiBundles', () => {
       expect(unpack).toBeTruthy();
       const opts = unpack![2] as { env?: Record<string, string> };
       expect(opts?.env).toBeDefined();
-      expect(opts.env!.GITHUB_APM_PAT).toBeUndefined();
-      expect(opts.env!.ADO_APM_PAT).toBeUndefined();
-      expect(opts.env!.GITHUB_TOKEN).toBeUndefined();
+      for (const key of TOKEN_ENV_DENYLIST) {
+        expect(opts.env![key]).toBeUndefined();
+      }
     } finally {
-      if (prev.a === undefined) delete process.env.GITHUB_APM_PAT; else process.env.GITHUB_APM_PAT = prev.a;
-      if (prev.b === undefined) delete process.env.ADO_APM_PAT;   else process.env.ADO_APM_PAT = prev.b;
-      if (prev.c === undefined) delete process.env.GITHUB_TOKEN;  else process.env.GITHUB_TOKEN = prev.c;
+      for (const key of TOKEN_ENV_DENYLIST) {
+        if (prev[key] === undefined) delete process.env[key];
+        else process.env[key] = prev[key];
+      }
     }
   });
 
@@ -296,9 +318,34 @@ describe('restoreMultiBundles', () => {
 // ---------------------------------------------------------------------------
 
 describe('previewBundleFiles', () => {
-  it('returns empty CollisionReport (stub)', async () => {
+  it('returns empty CollisionReport (stub for v1.5.0)', async () => {
     const report = await previewBundleFiles(['/a.tar.gz', '/b.tar.gz']);
     expect(report).toEqual({ sameSha: [], differentSha: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// logCollisionPolicy
+// ---------------------------------------------------------------------------
+
+describe('logCollisionPolicy', () => {
+  beforeEach(() => {
+    mockWarning.mockClear();
+  });
+
+  it('emits no warning when bundleCount <= 1 (no possible collisions)', () => {
+    logCollisionPolicy(0);
+    logCollisionPolicy(1);
+    expect(mockWarning).not.toHaveBeenCalled();
+  });
+
+  it('emits exactly one warning naming the bundle count when N > 1', () => {
+    logCollisionPolicy(3);
+    expect(mockWarning).toHaveBeenCalledTimes(1);
+    const msg = mockWarning.mock.calls[0][0] as string;
+    expect(msg).toContain('3 bundles');
+    expect(msg).toContain('list order');
+    expect(msg).toContain('overwrite');
   });
 });
 
@@ -307,15 +354,25 @@ describe('previewBundleFiles', () => {
 // ---------------------------------------------------------------------------
 
 describe('buildStrippedEnv', () => {
-  it('[B7] deletes exactly GITHUB_APM_PAT, ADO_APM_PAT, GITHUB_TOKEN', () => {
-    const prev = {
-      a: process.env.GITHUB_APM_PAT,
-      b: process.env.ADO_APM_PAT,
-      c: process.env.GITHUB_TOKEN,
-    };
-    process.env.GITHUB_APM_PAT = 'x';
-    process.env.ADO_APM_PAT = 'y';
-    process.env.GITHUB_TOKEN = 'z';
+  it('[B7] deletes every entry in TOKEN_ENV_DENYLIST and includes the new tokens', () => {
+    // Pin the explicit set so future additions to the denylist either extend
+    // this assertion or trip a clear test failure.
+    expect(TOKEN_ENV_DENYLIST).toEqual(
+      expect.arrayContaining([
+        'GITHUB_APM_PAT',
+        'ADO_APM_PAT',
+        'GITHUB_TOKEN',
+        'GH_TOKEN',
+        'ACTIONS_RUNTIME_TOKEN',
+        'ACTIONS_ID_TOKEN_REQUEST_TOKEN',
+      ]),
+    );
+
+    const prev: Record<string, string | undefined> = {};
+    for (const key of TOKEN_ENV_DENYLIST) {
+      prev[key] = process.env[key];
+      process.env[key] = `set-${key}`;
+    }
 
     try {
       const env = buildStrippedEnv();
@@ -323,9 +380,10 @@ describe('buildStrippedEnv', () => {
         expect(env[key]).toBeUndefined();
       }
     } finally {
-      if (prev.a === undefined) delete process.env.GITHUB_APM_PAT; else process.env.GITHUB_APM_PAT = prev.a;
-      if (prev.b === undefined) delete process.env.ADO_APM_PAT;   else process.env.ADO_APM_PAT = prev.b;
-      if (prev.c === undefined) delete process.env.GITHUB_TOKEN;  else process.env.GITHUB_TOKEN = prev.c;
+      for (const key of TOKEN_ENV_DENYLIST) {
+        if (prev[key] === undefined) delete process.env[key];
+        else process.env[key] = prev[key];
+      }
     }
   });
 

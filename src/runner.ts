@@ -62,7 +62,8 @@ export async function run(): Promise<void> {
     ].filter(Boolean) as string[];
     if (modeFlags.length > 1) {
       throw new Error(
-        `specify exactly one of: pack, bundle, bundles-file (got: ${modeFlags.join(', ')})`,
+        `inputs 'pack', 'bundle', and 'bundles-file' are mutually exclusive `
+        + `(got: ${modeFlags.join(', ')}). Pick exactly one mode per step.`,
       );
     }
 
@@ -146,17 +147,47 @@ export async function run(): Promise<void> {
 
     // MULTI-BUNDLE RESTORE MODE
     if (bundlesFileInput) {
-      const { parseBundleListFile, restoreMultiBundles } = await import('./multibundle.js');
+      const {
+        parseBundleListFile,
+        previewBundleFiles,
+        logCollisionPolicy,
+        restoreMultiBundles,
+      } = await import('./multibundle.js');
 
       const bundles = parseBundleListFile(bundlesFileInput, {
         workspaceDir: resolvedDir,
       });
       core.info(`Multi-bundle restore: ${bundles.length} bundle(s) from ${bundlesFileInput}`);
 
+      // Surface the collision policy BEFORE any work happens so users are
+      // never surprised by silent overwrites. Wired to previewBundleFiles
+      // so the call site is real today; per-file SHA collision detection
+      // ships in v1.6.0 (currently a no-op stub).
+      logCollisionPolicy(bundles.length);
+      const preview = await previewBundleFiles(bundles);
+      if (preview.differentSha.length > 0) {
+        core.warning(
+          `Detected ${preview.differentSha.length} different-content collision(s) `
+          + `across bundles. Later bundles in the list will win.`,
+        );
+      }
+      if (preview.sameSha.length > 0) {
+        core.info(
+          `Detected ${preview.sameSha.length} byte-identical file overlap(s) `
+          + `across bundles (benign duplicates).`,
+        );
+      }
+
+      // ensureApmInstalled() runs the install pipeline; restoreMultiBundles
+      // additionally probes `apm --version` as a defence-in-depth check so
+      // a transient install failure surfaces with a clear error before the
+      // first unpack rather than as a generic ENOENT mid-loop.
       await ensureApmInstalled();
       const result = await restoreMultiBundles(bundles, resolvedDir);
 
-      core.info(`Restored ${result.count} bundle(s) successfully`);
+      core.info(
+        `Restored ${result.count} bundle(s) successfully into ${resolvedDir}`,
+      );
 
       const primitivesPath = path.join(resolvedDir, '.github');
       core.setOutput('primitives-path', primitivesPath);

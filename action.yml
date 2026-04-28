@@ -40,10 +40,13 @@ inputs:
     default: ''
   bundles-file:
     description: |
-      Path to a UTF-8 text file with one bundle path per line.
-      Lines starting with '#' are comments; blank lines are ignored.
-      Bundles are restored in caller-specified order (later bundles
-      win on file collisions). Mutually exclusive with 'pack' and 'bundle'.
+      Path to a UTF-8 text file with one bundle path per line (paths must end
+      in '.tar.gz'). Lines starting with '#' are comments; blank lines are
+      ignored. Glob patterns are NOT expanded -- generate the list yourself
+      with 'find ... | sort' or equivalent.
+      Bundles are restored in caller-specified order (later bundles win on
+      file collisions; the action emits a warning before the loop runs so
+      the policy is explicit). Mutually exclusive with 'pack' and 'bundle'.
     required: false
     default: ''
   target:
