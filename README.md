@@ -72,6 +72,30 @@ Restore primitives from a bundle. The action installs APM (cached across runs) a
     bundle: './*.tar.gz'
 ```
 
+### Multi-bundle restore (multi-org)
+
+Restore primitives from multiple bundles into a single workspace. Used with matrix-based workflows where each matrix replica produces a separate bundle artifact (for example, one bundle per GitHub App / per organization):
+
+```yaml
+# In your agent job, after downloading all bundle artifacts:
+- uses: actions/download-artifact@v4
+  with:
+    pattern: apm-*
+    path: /tmp/bundles
+
+- run: find /tmp/bundles -name '*.tar.gz' | sort > /tmp/bundle-list.txt
+
+- uses: microsoft/apm-action@v1
+  id: restore
+  with:
+    bundles-file: /tmp/bundle-list.txt
+    working-directory: /tmp/agent-workspace
+
+# ${{ steps.restore.outputs.bundles-restored }} == number of bundles restored
+```
+
+Bundles are restored in the order listed (last wins on file collisions). The `bundles-file` input is mutually exclusive with `pack` and `bundle`. See [issue #29](https://github.com/microsoft/apm-action/issues/29) for the architecture rationale.
+
 ### Cross-job artifact workflow
 
 Pack once, restore everywhere — identical primitives across all consumer jobs.
@@ -180,6 +204,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | `compile` | No | `false` | Run `apm compile` after install to generate AGENTS.md |
 | `pack` | No | `false` | Pack a bundle after install (produces `.tar.gz` by default) |
 | `bundle` | No | | Restore from a bundle (local path or glob). Installs APM and unpacks via `apm unpack` (verified). |
+| `bundles-file` | No | | Path to a UTF-8 text file with one bundle path per line. Restores N bundles into a single workspace in caller-specified order (last wins on collisions). Mutually exclusive with `pack` and `bundle`. |
 | `target` | No | | Bundle target: `copilot`, `vscode`, `claude`, or `all` (used with `pack: true`) |
 | `archive` | No | `true` | Produce `.tar.gz` instead of directory (used with `pack: true`) |
 | `audit-report` | No | | Generate a SARIF audit report (hidden Unicode scanning). `apm install` already blocks critical findings; this adds reporting for Code Scanning and a markdown summary in `$GITHUB_STEP_SUMMARY`. Set to `true` for default path, or provide a custom path. |
@@ -192,6 +217,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | `primitives-path` | Path where agent primitives were deployed (`.github`) |
 | `bundle-path` | Path to the packed bundle (only set in pack mode) |
 | `audit-report-path` | Path to the generated SARIF audit report (if `audit-report` was set) |
+| `bundles-restored` | Number of bundles successfully restored (multi-bundle mode only) |
 
 ## Third-Party Dependencies
 
