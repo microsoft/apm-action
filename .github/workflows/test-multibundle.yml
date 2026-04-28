@@ -1,0 +1,101 @@
+name: 'Test: Multi-bundle restore'
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  make-bundles:
+    name: 'Pack bundle (${{ matrix.org }})'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        org: [alpha, beta, gamma]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create throwaway APM project
+        run: |
+          mkdir -p /tmp/apm-test-${{ matrix.org }}/.github/skills/skill-${{ matrix.org }}
+
+          cat > /tmp/apm-test-${{ matrix.org }}/apm.yml <<'YAML'
+          name: test-${{ matrix.org }}
+          version: 1.0.0
+          dependencies:
+            apm: []
+          YAML
+
+          cat > /tmp/apm-test-${{ matrix.org }}/.github/skills/skill-${{ matrix.org }}/SKILL.md <<'MD'
+          ---
+          name: skill-${{ matrix.org }}
+          ---
+          # Skill from org ${{ matrix.org }}
+          MD
+
+      - name: Pack bundle
+        uses: ./
+        with:
+          working-directory: /tmp/apm-test-${{ matrix.org }}
+          pack: 'true'
+          archive: 'true'
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apm-test-${{ matrix.org }}
+          path: /tmp/apm-test-${{ matrix.org }}/build/*.tar.gz
+          if-no-files-found: error
+
+  restore-bundles:
+    name: 'Restore 3 bundles'
+    needs: make-bundles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all test bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: apm-test-*
+          path: /tmp/bundles
+
+      - name: Generate bundle list file
+        run: |
+          find /tmp/bundles -name '*.tar.gz' | sort > /tmp/bundle-list.txt
+          echo '--- Bundle list ---'
+          cat /tmp/bundle-list.txt
+          echo '---'
+          test -s /tmp/bundle-list.txt
+
+      - name: Restore multi-bundle
+        id: restore
+        uses: ./
+        with:
+          bundles-file: /tmp/bundle-list.txt
+          working-directory: /tmp/restore-target
+
+      - name: Assert all 3 skills landed
+        run: |
+          for org in alpha beta gamma; do
+            SKILL="/tmp/restore-target/.github/skills/skill-${org}/SKILL.md"
+            if [ ! -f "$SKILL" ]; then
+              echo "FAIL: skill-${org} not found at $SKILL"
+              ls -laR /tmp/restore-target || true
+              exit 1
+            fi
+            echo "OK: skill-${org} found"
+          done
+
+      - name: Assert bundles-restored output
+        run: |
+          RESTORED='${{ steps.restore.outputs.bundles-restored }}'
+          if [ "$RESTORED" != "3" ]; then
+            echo "FAIL: expected bundles-restored=3, got '$RESTORED'"
+            exit 1
+          fi
+          echo "OK: bundles-restored=3"
