@@ -28,9 +28,10 @@ jobs:
           # The point of this test is to validate the multi-bundle LOOP
           # (N pack jobs -> N artifacts -> N unpacks into one workspace),
           # not per-org distinctness (that is verified by microsoft/apm#982
-          # against real Apps). Identical bundles also exercise the
-          # same-SHA collision path -- restore should succeed without
-          # warnings.
+          # against real Apps with genuinely distinct deps -- something
+          # apm-action CI cannot easily mirror without a fleet of test
+          # packages). Identical bundles also exercise the same-SHA
+          # collision path -- restore should succeed without warnings.
           cat > "$PROJ/apm.yml" <<'YAML'
           name: test-${{ matrix.org }}
           version: 1.0.0
@@ -40,21 +41,6 @@ jobs:
               - microsoft/apm-sample-package
             mcp: []
           YAML
-
-          # Per-org marker file proves the matrix replicas are genuinely
-          # independent; if the multi-bundle restore later merges all 3,
-          # all 3 marker files must coexist in the merged workspace.
-          # The marker is shaped as a fake skill so the bundler (which
-          # bundles APM primitive directories, not arbitrary .github/
-          # contents) will pick it up.
-          mkdir -p "$PROJ/.github/skills/marker-${{ matrix.org }}"
-          cat > "$PROJ/.github/skills/marker-${{ matrix.org }}/SKILL.md" <<MARK
-          ---
-          name: marker-${{ matrix.org }}
-          description: per-org marker for multi-bundle CI test
-          ---
-          # marker-${{ matrix.org }}
-          MARK
 
       - name: Pack bundle
         uses: ./
@@ -128,20 +114,17 @@ jobs:
           fi
           echo "OK: bundles-restored=3"
 
-      - name: Assert per-org marker skills all coexist (proves true merge)
-        run: |
-          # Each pack job wrote a unique marker skill at
-          # .github/skills/marker-<org>/SKILL.md. After multi-bundle
-          # restore, all 3 must be present in the merged workspace,
-          # proving the loop is genuinely additive across replicas.
-          for ORG in alpha beta gamma; do
-            if [ ! -f "/tmp/restore-target/.github/skills/marker-${ORG}/SKILL.md" ]; then
-              echo "FAIL: missing marker skill for org=${ORG}"
-              ls -la /tmp/restore-target/.github/skills/ || true
-              exit 1
-            fi
-          done
-          echo "OK: all 3 per-org marker skills present in merged workspace"
+      # NOTE on what this CI does and does NOT prove:
+      # - PROVES: the multi-bundle LOOP works (3 separate pack artifacts
+      #   each unpack successfully into one shared workspace, no errors,
+      #   bundles-restored output is correct, collision-policy banner
+      #   fires).
+      # - DOES NOT PROVE: distinct-content merge across N orgs. apm
+      #   bundle only includes files attributable to dependencies in
+      #   apm.yml, so we cannot inject per-replica marker files into the
+      #   bundle without having N genuinely distinct test packages.
+      #   The real distinct-content / per-App scenario is end-to-end
+      #   tested by microsoft/apm#982 against real GitHub Apps.
 
   reject-traversal:
     name: 'Negative test: bundles-file rejects .. traversal'
