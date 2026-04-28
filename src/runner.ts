@@ -23,6 +23,7 @@ export async function run(): Promise<void> {
     const workingDir = core.getInput('working-directory') || '.';
     const resolvedDir = path.resolve(workingDir);
     const bundleInput = core.getInput('bundle').trim();
+    const bundlesFileInput = core.getInput('bundles-file').trim();
     const packInput = core.getInput('pack') === 'true';
     const isolated = core.getInput('isolated') === 'true';
     const auditReportInput = core.getInput('audit-report').trim();
@@ -53,9 +54,16 @@ export async function run(): Promise<void> {
       }
     }
 
-    // Validate inputs before touching the filesystem.
-    if (bundleInput && packInput) {
-      throw new Error("'pack' and 'bundle' inputs are mutually exclusive");
+    // 3-way mutex: at most one of pack / bundle / bundles-file.
+    const modeFlags = [
+      packInput && 'pack',
+      bundleInput && 'bundle',
+      bundlesFileInput && 'bundles-file',
+    ].filter(Boolean) as string[];
+    if (modeFlags.length > 1) {
+      throw new Error(
+        `specify exactly one of: pack, bundle, bundles-file (got: ${modeFlags.join(', ')})`,
+      );
     }
 
     // Directory creation contract:
@@ -65,7 +73,7 @@ export async function run(): Promise<void> {
     //   - non-isolated mode: the caller owns the project directory (which must
     //     contain apm.yml). If it doesn't exist, we fail fast with a clear message
     //     rather than silently creating an empty directory that would just fail later.
-    const actionOwnsDir = isolated || packInput || !!bundleInput;
+    const actionOwnsDir = isolated || packInput || !!bundleInput || !!bundlesFileInput;
     if (actionOwnsDir) {
       fs.mkdirSync(resolvedDir, { recursive: true });
     } else if (!fs.existsSync(resolvedDir)) {
@@ -133,6 +141,34 @@ export async function run(): Promise<void> {
 
       core.setOutput('success', 'true');
       core.info('APM action completed successfully (restore mode)');
+      return;
+    }
+
+    // MULTI-BUNDLE RESTORE MODE
+    if (bundlesFileInput) {
+      const { parseBundleListFile, restoreMultiBundles } = await import('./multibundle.js');
+
+      const bundles = parseBundleListFile(bundlesFileInput, {
+        workspaceDir: resolvedDir,
+      });
+      core.info(`Multi-bundle restore: ${bundles.length} bundle(s) from ${bundlesFileInput}`);
+
+      await ensureApmInstalled();
+      const result = await restoreMultiBundles(bundles, resolvedDir);
+
+      core.info(`Restored ${result.count} bundle(s) successfully`);
+
+      const primitivesPath = path.join(resolvedDir, '.github');
+      core.setOutput('primitives-path', primitivesPath);
+      core.setOutput('bundles-restored', String(result.count));
+
+      // Run audit on merged workspace if requested
+      if (auditReportPath) {
+        await runAuditReport(resolvedDir, auditReportPath);
+      }
+
+      core.setOutput('success', 'true');
+      core.info('APM action completed successfully (multi-bundle restore mode)');
       return;
     }
 
