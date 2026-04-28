@@ -44,8 +44,17 @@ jobs:
           # Per-org marker file proves the matrix replicas are genuinely
           # independent; if the multi-bundle restore later merges all 3,
           # all 3 marker files must coexist in the merged workspace.
-          mkdir -p "$PROJ/.github/markers"
-          echo "org=${{ matrix.org }}" > "$PROJ/.github/markers/${{ matrix.org }}.txt"
+          # The marker is shaped as a fake skill so the bundler (which
+          # bundles APM primitive directories, not arbitrary .github/
+          # contents) will pick it up.
+          mkdir -p "$PROJ/.github/skills/marker-${{ matrix.org }}"
+          cat > "$PROJ/.github/skills/marker-${{ matrix.org }}/SKILL.md" <<MARK
+          ---
+          name: marker-${{ matrix.org }}
+          description: per-org marker for multi-bundle CI test
+          ---
+          # marker-${{ matrix.org }}
+          MARK
 
       - name: Pack bundle
         uses: ./
@@ -119,19 +128,20 @@ jobs:
           fi
           echo "OK: bundles-restored=3"
 
-      - name: Assert per-org marker files all coexist (proves true merge)
+      - name: Assert per-org marker skills all coexist (proves true merge)
         run: |
-          # Each pack job wrote a unique marker file under .github/markers/.
-          # After multi-bundle restore, all 3 must be present in the merged
-          # workspace, proving the loop is genuinely additive across replicas.
+          # Each pack job wrote a unique marker skill at
+          # .github/skills/marker-<org>/SKILL.md. After multi-bundle
+          # restore, all 3 must be present in the merged workspace,
+          # proving the loop is genuinely additive across replicas.
           for ORG in alpha beta gamma; do
-            if [ ! -f "/tmp/restore-target/.github/markers/${ORG}.txt" ]; then
-              echo "FAIL: missing marker for org=${ORG}"
-              ls -la /tmp/restore-target/.github/markers/ || true
+            if [ ! -f "/tmp/restore-target/.github/skills/marker-${ORG}/SKILL.md" ]; then
+              echo "FAIL: missing marker skill for org=${ORG}"
+              ls -la /tmp/restore-target/.github/skills/ || true
               exit 1
             fi
           done
-          echo "OK: all 3 per-org marker files present in merged workspace"
+          echo "OK: all 3 per-org marker skills present in merged workspace"
 
   reject-traversal:
     name: 'Negative test: bundles-file rejects .. traversal'
