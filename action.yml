@@ -38,6 +38,17 @@ inputs:
     description: 'Restore from a bundle (local path or glob pattern). Skips APM installation entirely.'
     required: false
     default: ''
+  bundles-file:
+    description: |
+      Path to a UTF-8 text file with one bundle path per line (paths must end
+      in '.tar.gz'). Lines starting with '#' are comments; blank lines are
+      ignored. Glob patterns are NOT expanded -- generate the list yourself
+      with 'find ... | sort' or equivalent.
+      Bundles are restored in caller-specified order (later bundles win on
+      file collisions; the action emits a warning before the loop runs so
+      the policy is explicit). Mutually exclusive with 'pack' and 'bundle'.
+    required: false
+    default: ''
   target:
     description: 'Bundle target: copilot, vscode, claude, or all (used with pack: true)'
     required: false
@@ -64,6 +75,8 @@ outputs:
     description: 'Path to the packed bundle (only set in pack mode)'
   audit-report-path:
     description: 'Path to the generated SARIF audit report, if audit-report was enabled'
+  bundles-restored:
+    description: 'Number of bundles successfully restored (multi-bundle mode only).'
 
 runs:
   using: 'node24'

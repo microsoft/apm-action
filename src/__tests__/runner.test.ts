@@ -706,3 +706,129 @@ describe('run (restore mode)', () => {
     expect(installOrder).toBeLessThan(extractOrder);
   });
 });
+
+// ---------------------------------------------------------------------------
+// 3-way mutex: pack / bundle / bundles-file
+// ---------------------------------------------------------------------------
+//
+// Existing `mockGetInput.mockImplementation` switch blocks already fall through
+// to `default: return ''` so they handle the new `'bundles-file'` input
+// transparently with no edits to the existing tests.
+
+describe('3-way mutex (pack / bundle / bundles-file)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-action-mutex-'));
+    mockEnsureApmInstalled.mockResolvedValue(undefined);
+    mockExec.mockResolvedValue(0);
+    mockGetExecOutput.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+    mockResolveLocalBundle.mockImplementation(async () => path.join(tmpDir, 'bundle.tar.gz'));
+    mockExtractBundle.mockResolvedValue({ files: 5, verified: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function inputs(over: Partial<Record<string, string>>): (name: unknown) => string {
+    const base: Record<string, string> = {
+      'working-directory': tmpDir,
+      dependencies: '',
+      isolated: 'false',
+      bundle: '',
+      'bundles-file': '',
+      pack: 'false',
+      compile: 'false',
+      script: '',
+      'audit-report': '',
+      target: '',
+      archive: 'true',
+    };
+    const merged = { ...base, ...over };
+    return (name: unknown) => merged[name as string] ?? '';
+  }
+
+  it('rejects pack + bundle', async () => {
+    mockGetInput.mockImplementation(inputs({ pack: 'true', bundle: './x.tar.gz' }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('mutually exclusive'),
+    );
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('pack, bundle'),
+    );
+  });
+
+  it('rejects pack + bundles-file', async () => {
+    mockGetInput.mockImplementation(inputs({ pack: 'true', 'bundles-file': '/tmp/list.txt' }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('mutually exclusive'),
+    );
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('pack, bundles-file'),
+    );
+  });
+
+  it('rejects bundle + bundles-file', async () => {
+    mockGetInput.mockImplementation(inputs({ bundle: './x.tar.gz', 'bundles-file': '/tmp/list.txt' }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('mutually exclusive'),
+    );
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('bundle, bundles-file'),
+    );
+  });
+
+  it('rejects all three', async () => {
+    mockGetInput.mockImplementation(inputs({
+      pack: 'true', bundle: './x.tar.gz', 'bundles-file': '/tmp/list.txt',
+    }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('pack, bundle, bundles-file'),
+    );
+  });
+
+  it('allows pack alone', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, 'build'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'), 'fake');
+    mockRunPackStep.mockResolvedValue(path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'));
+
+    mockGetInput.mockImplementation(inputs({ pack: 'true' }));
+    await run();
+    expect(mockSetFailed).not.toHaveBeenCalled();
+  });
+
+  it('allows bundle alone', async () => {
+    mockGetInput.mockImplementation(inputs({ bundle: './x.tar.gz' }));
+    await run();
+    expect(mockSetFailed).not.toHaveBeenCalled();
+  });
+
+  it('allows bundles-file alone', async () => {
+    // Create a real list file with one bundle path -- parseBundleListFile uses
+    // real fs. The mocked @actions/exec returns 0 for both `apm --version`
+    // and `apm unpack`, so the multi-bundle branch completes successfully.
+    const listFile = path.join(tmpDir, 'bundles.txt');
+    fs.writeFileSync(listFile, '/abs/some-bundle.tar.gz\n');
+
+    mockGetInput.mockImplementation(inputs({ 'bundles-file': listFile }));
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    expect(mockSetOutput).toHaveBeenCalledWith('bundles-restored', '1');
+  });
+
+  it('allows none (default install mode)', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+    mockGetInput.mockImplementation(inputs({}));
+    await run();
+    expect(mockSetFailed).not.toHaveBeenCalled();
+  });
+});
+

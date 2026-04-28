@@ -72,6 +72,35 @@ Restore primitives from a bundle. The action installs APM (cached across runs) a
     bundle: './*.tar.gz'
 ```
 
+<a id="multi-bundle-restore"></a>
+### Multi-bundle restore (multi-org / multi-app)
+
+**Why:** when you fan out a `pack` job across N GitHub Apps (or N orgs, or N teams) you end up with N separate bundle artifacts. Without `bundles-file`, the consumer job has to call `microsoft/apm-action@v1` N times in sequence, which adds latency and obscures which install came from which source. `bundles-file` lets a single restore step merge all N bundles into one workspace in caller-specified order. See [issue #29](https://github.com/microsoft/apm-action/issues/29) for the full rationale and diagrams.
+
+**Backward compatibility:** existing single-`bundle` callers are unaffected. `bundles-file` is a new opt-in input; `pack`, `bundle`, and `bundles-file` are mutually exclusive (the action errors if more than one is set).
+
+```yaml
+# In a downstream job that consumes all bundles:
+- uses: actions/download-artifact@v4
+  with:
+    pattern: apm-*
+    path: /tmp/bundles
+
+- run: find /tmp/bundles -name '*.tar.gz' | sort > /tmp/bundle-list.txt
+
+- uses: microsoft/apm-action@v1
+  id: restore
+  with:
+    bundles-file: /tmp/bundle-list.txt
+    working-directory: /tmp/agent-workspace
+
+- run: echo "Merged ${{ steps.restore.outputs.bundles-restored }} bundles into the workspace"
+```
+
+The `bundles-restored` output reports the integer count of bundles successfully merged, which is convenient for assertions and logging in downstream steps.
+
+**Collision policy:** bundles are applied in list order; on file conflicts, later bundles overwrite earlier bundles. The action logs an explicit warning naming the bundle count before the restore loop begins, so the policy is never silent. Per-file SHA-aware collision detection is planned for v1.6.0.
+
 ### Cross-job artifact workflow
 
 Pack once, restore everywhere — identical primitives across all consumer jobs.
@@ -153,7 +182,7 @@ For cross-org private repos, pass a PAT with broader scope via the `github-token
     github-token: ${{ secrets.APM_PAT }}
 ```
 
-For multi-org or multi-platform scenarios, use the `env:` block for full control. An explicit `GITHUB_APM_PAT` in `env:` always wins over the auto-forwarded value:
+For multi-org or multi-platform scenarios, use the `env:` block for full control. An explicit `GITHUB_APM_PAT` in `env:` always wins over the auto-forwarded value. (For the matrix-based fan-out pattern that pairs one App per matrix replica with [`bundles-file:`](#multi-bundle-restore), see [issue #29](https://github.com/microsoft/apm-action/issues/29).)
 
 ```yaml
 # Multi-org / multi-platform: full control via env block
@@ -180,6 +209,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | `compile` | No | `false` | Run `apm compile` after install to generate AGENTS.md |
 | `pack` | No | `false` | Pack a bundle after install (produces `.tar.gz` by default) |
 | `bundle` | No | | Restore from a bundle (local path or glob). Installs APM and unpacks via `apm unpack` (verified). |
+| `bundles-file` | No | | Path to a UTF-8 text file with one bundle path per line. Restores N bundles into a single workspace in caller-specified order (last wins on collisions). Mutually exclusive with `pack` and `bundle`. |
 | `target` | No | | Bundle target: `copilot`, `vscode`, `claude`, or `all` (used with `pack: true`) |
 | `archive` | No | `true` | Produce `.tar.gz` instead of directory (used with `pack: true`) |
 | `audit-report` | No | | Generate a SARIF audit report (hidden Unicode scanning). `apm install` already blocks critical findings; this adds reporting for Code Scanning and a markdown summary in `$GITHUB_STEP_SUMMARY`. Set to `true` for default path, or provide a custom path. |
@@ -192,6 +222,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | `primitives-path` | Path where agent primitives were deployed (`.github`) |
 | `bundle-path` | Path to the packed bundle (only set in pack mode) |
 | `audit-report-path` | Path to the generated SARIF audit report (if `audit-report` was set) |
+| `bundles-restored` | Number of bundles successfully restored (multi-bundle mode only) |
 
 ## Third-Party Dependencies
 

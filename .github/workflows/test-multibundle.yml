@@ -1,0 +1,156 @@
+name: 'Test: Multi-bundle restore'
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  make-bundles:
+    name: 'Pack bundle (${{ matrix.org }})'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        org: [alpha, beta, gamma]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create throwaway APM project
+        run: |
+          PROJ=/tmp/apm-test-${{ matrix.org }}
+          mkdir -p "$PROJ"
+
+          # Each matrix replica installs the same public sample package.
+          # The point of this test is to validate the multi-bundle LOOP
+          # (N pack jobs -> N artifacts -> N unpacks into one workspace),
+          # not per-org distinctness (that is verified by microsoft/apm#982
+          # against real Apps with genuinely distinct deps -- something
+          # apm-action CI cannot easily mirror without a fleet of test
+          # packages). Identical bundles also exercise the same-SHA
+          # collision path -- restore should succeed without warnings.
+          cat > "$PROJ/apm.yml" <<'YAML'
+          name: test-${{ matrix.org }}
+          version: 1.0.0
+          description: throwaway fixture for multi-bundle CI
+          dependencies:
+            apm:
+              - microsoft/apm-sample-package
+            mcp: []
+          YAML
+
+      - name: Pack bundle
+        uses: ./
+        with:
+          working-directory: /tmp/apm-test-${{ matrix.org }}
+          pack: 'true'
+          archive: 'true'
+
+      - name: Upload bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: apm-test-${{ matrix.org }}
+          path: /tmp/apm-test-${{ matrix.org }}/build/*.tar.gz
+          if-no-files-found: error
+
+  restore-bundles:
+    name: 'Restore 3 bundles'
+    needs: make-bundles
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download all test bundles
+        uses: actions/download-artifact@v4
+        with:
+          pattern: apm-test-*
+          path: /tmp/bundles
+
+      - name: Generate bundle list file
+        run: |
+          find /tmp/bundles -name '*.tar.gz' | sort > /tmp/bundle-list.txt
+          echo '--- Bundle list ---'
+          cat /tmp/bundle-list.txt
+          echo '---'
+          test -s /tmp/bundle-list.txt
+
+      - name: Restore multi-bundle
+        id: restore
+        uses: ./
+        with:
+          bundles-file: /tmp/bundle-list.txt
+          working-directory: /tmp/restore-target
+
+      - name: Assert sample package files landed
+        run: |
+          # microsoft/apm-sample-package is the same dep across all 3 orgs;
+          # whatever it ships should appear in restore-target/.github after
+          # at least one unpack succeeds. Just verify the deployment dir
+          # is non-empty (each release of the sample package may rename
+          # individual files, so a content-agnostic check is more durable).
+          if [ ! -d /tmp/restore-target/.github ]; then
+            echo "FAIL: /tmp/restore-target/.github does not exist"
+            ls -laR /tmp/restore-target || true
+            exit 1
+          fi
+          FILE_COUNT=$(find /tmp/restore-target/.github -type f | wc -l)
+          if [ "$FILE_COUNT" -lt 1 ]; then
+            echo "FAIL: no files deployed under /tmp/restore-target/.github"
+            ls -laR /tmp/restore-target || true
+            exit 1
+          fi
+          echo "OK: $FILE_COUNT files deployed under /tmp/restore-target/.github"
+          find /tmp/restore-target/.github -type f | head -20
+
+      - name: Assert bundles-restored output
+        run: |
+          RESTORED='${{ steps.restore.outputs.bundles-restored }}'
+          if [ "$RESTORED" != "3" ]; then
+            echo "FAIL: expected bundles-restored=3, got '$RESTORED'"
+            exit 1
+          fi
+          echo "OK: bundles-restored=3"
+
+      # NOTE on what this CI does and does NOT prove:
+      # - PROVES: the multi-bundle LOOP works (3 separate pack artifacts
+      #   each unpack successfully into one shared workspace, no errors,
+      #   bundles-restored output is correct, collision-policy banner
+      #   fires).
+      # - DOES NOT PROVE: distinct-content merge across N orgs. apm
+      #   bundle only includes files attributable to dependencies in
+      #   apm.yml, so we cannot inject per-replica marker files into the
+      #   bundle without having N genuinely distinct test packages.
+      #   The real distinct-content / per-App scenario is end-to-end
+      #   tested by microsoft/apm#982 against real GitHub Apps.
+
+  reject-traversal:
+    name: 'Negative test: bundles-file rejects .. traversal'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Generate bundles-file with rejected '..' segment
+        run: |
+          mkdir -p /tmp/neg-bundles
+          cat > /tmp/neg-bundle-list.txt <<'EOF'
+          ../escape.tar.gz
+          EOF
+
+      - name: Restore must FAIL on traversal
+        id: restore-neg
+        continue-on-error: true
+        uses: ./
+        with:
+          bundles-file: /tmp/neg-bundle-list.txt
+          working-directory: /tmp/neg-restore-target
+
+      - name: Assert step failed (traversal rejected)
+        run: |
+          if [ "${{ steps.restore-neg.outcome }}" != "failure" ]; then
+            echo "FAIL: expected restore step to fail on '..' traversal, got outcome=${{ steps.restore-neg.outcome }}"
+            exit 1
+          fi
+          echo "OK: '..' traversal in bundles-file was rejected as required"
