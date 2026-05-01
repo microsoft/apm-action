@@ -5,6 +5,9 @@ import path from 'node:path';
 
 // ESM mocking: set up mocks before dynamic imports.
 const mockExec = jest.fn<(cmd: string, args?: string[], options?: object) => Promise<number>>();
+const mockGetExecOutput = jest.fn<
+  (cmd: string, args?: string[], opts?: unknown) => Promise<{ exitCode: number; stdout: string; stderr: string }>
+>();
 const mockInfo = jest.fn();
 const mockDebug = jest.fn();
 const mockWarning = jest.fn();
@@ -17,6 +20,7 @@ jest.unstable_mockModule('@actions/core', () => ({
 
 jest.unstable_mockModule('@actions/exec', () => ({
   exec: mockExec,
+  getExecOutput: mockGetExecOutput,
 }));
 
 const {
@@ -207,6 +211,18 @@ describe('restoreMultiBundles', () => {
       if (cmd === 'apm' && args?.[0] === '--version') return 0;
       if (cmd === 'apm' && args?.[0] === 'unpack') return 0;
       return 1;
+    });
+    // Default: detectBundleFormat (which uses `tar tzf`) sees an APM bundle
+    // (apm.lock.yaml present). Individual tests override for plugin scenarios.
+    mockGetExecOutput.mockImplementation(async (cmd, args) => {
+      if (cmd === 'tar' && args?.[0] === 'tzf') {
+        return {
+          exitCode: 0,
+          stdout: 'pkg-1.0.0/\npkg-1.0.0/apm.lock.yaml\npkg-1.0.0/.github/agents/foo.md\n',
+          stderr: '',
+        };
+      }
+      return { exitCode: 1, stdout: '', stderr: '' };
     });
   });
 

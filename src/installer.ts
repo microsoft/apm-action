@@ -59,23 +59,73 @@ export async function resolveDownloadUrl(version: string): Promise<{ url: string
   };
 }
 
+export interface InstallResult {
+  /**
+   * The resolved version that ended up on PATH. For an explicit `apm-version`
+   * input this matches the request; for `latest` it is the version the GitHub
+   * Releases API returned (or the version reported by an already-on-PATH apm).
+   */
+  resolvedVersion: string;
+  /**
+   * Directory containing the apm binary as added to PATH. Empty string if the
+   * action reused an apm binary that was already on PATH (we cannot know its
+   * tool-cache directory in that case).
+   */
+  toolDir: string;
+  /**
+   * Full path to the apm executable. Useful for `apm-path` action output and
+   * for diagnostics. Empty string if reusing a pre-existing PATH apm.
+   */
+  binaryPath: string;
+}
+
+/**
+ * Resolve the version reported by an apm binary that is already on PATH.
+ * Returns the cleaned version string (no leading 'v'), or null if apm is not
+ * available or the probe failed.
+ */
+async function probePathVersion(): Promise<string | null> {
+  try {
+    const result = await exec.getExecOutput('apm', ['--version'], {
+      ignoreReturnCode: true,
+      silent: true,
+    });
+    if (result.exitCode !== 0) return null;
+    // `apm --version` prints e.g. "apm 0.11.0" or "0.11.0" depending on build.
+    const match = /(\d+\.\d+\.\d+\S*)/.exec(result.stdout);
+    return match ? match[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Ensure APM CLI is installed and available on the runner.
  * Uses @actions/tool-cache for downloading, extracting, and caching.
+ *
+ * Version semantics:
+ *   - `apm-version: latest` -- if any apm is already on PATH, reuse it; else
+ *     resolve the latest GitHub release and install via tool-cache.
+ *   - `apm-version: <pinned>` -- always install the requested version into the
+ *     tool-cache (or reuse a tool-cache hit). Never short-circuits to a random
+ *     apm that happens to be on PATH; the caller asked for a specific version
+ *     and gets that version.
  */
-export async function ensureApmInstalled(): Promise<void> {
-  const apmVersion = core.getInput('apm-version') || 'latest';
+export async function ensureApmInstalled(): Promise<InstallResult> {
+  const apmVersionInput = (core.getInput('apm-version') || 'latest').trim();
+  const wantLatest = apmVersionInput === 'latest' || apmVersionInput === '';
 
-  // Check if already available
-  const rc = await exec.exec('apm', ['--version'], { ignoreReturnCode: true, silent: true }).catch(() => 1);
-  if (rc === 0) {
-    core.info('APM already installed');
-    return;
+  if (wantLatest) {
+    const pathVersion = await probePathVersion();
+    if (pathVersion) {
+      core.info(`APM ${pathVersion} already available on PATH (apm-version: latest)`);
+      return { resolvedVersion: pathVersion, toolDir: '', binaryPath: '' };
+    }
   }
 
-  core.info(`Installing APM (version: ${apmVersion})...`);
+  core.info(`Installing APM (version: ${apmVersionInput})...`);
 
-  const { url, resolvedVersion } = await resolveDownloadUrl(apmVersion);
+  const { url, resolvedVersion } = await resolveDownloadUrl(apmVersionInput);
   const suffix = getAssetSuffix();
 
   // Check tool-cache first
@@ -103,4 +153,7 @@ export async function ensureApmInstalled(): Promise<void> {
   }
 
   core.info(`APM ${resolvedVersion} installed successfully`);
+
+  const binaryPath = path.join(toolDir, 'apm');
+  return { resolvedVersion, toolDir, binaryPath };
 }

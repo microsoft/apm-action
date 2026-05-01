@@ -156,6 +156,10 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    strategy:
+      fail-fast: false
+      matrix:
+        bundle-format: [apm, plugin]
     steps:
       - uses: actions/checkout@v6
 
@@ -175,15 +179,21 @@ jobs:
         with:
           pack: 'true'
           target: 'vscode'
+          bundle-format: ${{ matrix.bundle-format }}
 
-      - name: Verify bundle-path output is set
+      - name: Verify bundle-path and bundle-format outputs are set
         run: |
           BUNDLE="${{ steps.pack.outputs.bundle-path }}"
+          FORMAT="${{ steps.pack.outputs.bundle-format }}"
           if [ -z "$BUNDLE" ]; then
             echo "::error::bundle-path output not set"
             exit 1
           fi
-          echo "Bundle path: $BUNDLE"
+          if [ "$FORMAT" != "${{ matrix.bundle-format }}" ]; then
+            echo "::error::bundle-format output is '$FORMAT', expected '${{ matrix.bundle-format }}'"
+            exit 1
+          fi
+          echo "Bundle path: $BUNDLE (format=$FORMAT)"
 
       - name: Verify bundle archive exists and is valid
         run: |
@@ -192,17 +202,129 @@ jobs:
             echo "::error::Bundle file not found: $BUNDLE"
             exit 1
           fi
-          # Verify it's a valid gzip archive
           if ! file "$BUNDLE" | grep -q 'gzip'; then
             echo "::error::Bundle is not a valid gzip archive"
             exit 1
           fi
-          # Verify it contains .github/ content
-          if ! tar tzf "$BUNDLE" | grep -q '.github/'; then
-            echo "::error::Bundle does not contain .github/ directory"
+
+      - name: Verify APM bundle layout (apm.lock.yaml + .github/)
+        if: matrix.bundle-format == 'apm'
+        run: |
+          BUNDLE="${{ steps.pack.outputs.bundle-path }}"
+          CONTENTS=$(tar tzf "$BUNDLE")
+          echo "$CONTENTS" | grep -q 'apm.lock.yaml' || { echo "::error::APM bundle missing apm.lock.yaml"; exit 1; }
+          echo "$CONTENTS" | grep -q '.github/' || { echo "::error::APM bundle missing .github/"; exit 1; }
+          echo "$CONTENTS" | grep -q 'plugin.json' && { echo "::error::APM bundle should not contain plugin.json"; exit 1; }
+          echo "Pack(apm) layout valid"
+
+      - name: Verify plugin bundle layout (plugin.json, no apm.lock.yaml)
+        if: matrix.bundle-format == 'plugin'
+        run: |
+          BUNDLE="${{ steps.pack.outputs.bundle-path }}"
+          CONTENTS=$(tar tzf "$BUNDLE")
+          echo "$CONTENTS" | grep -q 'plugin.json' || { echo "::error::Plugin bundle missing plugin.json"; exit 1; }
+          echo "$CONTENTS" | grep -q 'apm.lock.yaml' && { echo "::error::Plugin bundle should not contain apm.lock.yaml"; exit 1; }
+          echo "Pack(plugin) layout valid"
+
+  # Integration: setup-only mode -- install CLI and exit, do not run apm install.
+  test-setup-only:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run action in setup-only mode
+        id: setup
+        uses: ./
+        with:
+          setup-only: 'true'
+
+      - name: Verify CLI is on PATH and outputs are set
+        run: |
+          if ! command -v apm >/dev/null; then
+            echo "::error::apm is not on PATH after setup-only"
             exit 1
           fi
-          echo "✅ Pack mode: bundle produced and valid"
+          if [ -z "${{ steps.setup.outputs.apm-version }}" ]; then
+            echo "::error::apm-version output not set"
+            exit 1
+          fi
+          echo "Resolved apm-version: ${{ steps.setup.outputs.apm-version }}"
+          echo "Resolved apm-path: ${{ steps.setup.outputs.apm-path }}"
+          echo "apm --version reports: $(apm --version)"
+
+      - name: Verify no install ran (no .github/ deployed)
+        run: |
+          if [ -d .github/agents ] || [ -d .github/skills ] || [ -d .github/instructions ] || [ -d .github/prompts ]; then
+            echo "::error::setup-only deployed primitives (it should not)"
+            ls -la .github/ || true
+            exit 1
+          fi
+          echo "setup-only correctly skipped install"
+
+      - name: Use the installed CLI directly
+        run: |
+          cat > apm.yml << 'EOF'
+          name: ci-setup-only-driver
+          version: 1.0.0
+          dependencies:
+            apm:
+              - microsoft/apm-sample-package
+          EOF
+          apm install
+          test -d .github/skills
+
+  # Integration: plugin bundle is rejected by restore (clear error, no clobber).
+  test-restore-plugin-rejected:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create test apm.yml
+        run: |
+          cat > apm.yml << 'EOF'
+          name: ci-test-plugin-restore
+          version: 1.0.0
+          dependencies:
+            apm:
+              - microsoft/apm-sample-package
+          EOF
+
+      - name: Pack a plugin-format bundle
+        id: pack
+        uses: ./
+        with:
+          pack: 'true'
+          target: 'vscode'
+          bundle-format: 'plugin'
+
+      - name: Move bundle aside and clear workspace
+        run: |
+          mkdir -p /tmp/apm-bundles
+          cp "${{ steps.pack.outputs.bundle-path }}" /tmp/apm-bundles/plugin.tar.gz
+          rm -rf .github/instructions .github/agents .github/skills .github/prompts apm.yml apm.lock.yaml
+
+      - name: Attempt restore -- expect failure
+        id: restore
+        continue-on-error: true
+        uses: ./
+        with:
+          bundle: '/tmp/apm-bundles/plugin.tar.gz'
+
+      - name: Assert restore failed with plugin-format error
+        run: |
+          if [ "${{ steps.restore.outcome }}" != "failure" ]; then
+            echo "::error::restore should have failed for a plugin-format bundle, got ${{ steps.restore.outcome }}"
+            exit 1
+          fi
+          if [ -d .github/skills ] || [ -d .github/agents ]; then
+            echo "::error::workspace was clobbered by a rejected restore"
+            exit 1
+          fi
+          echo "plugin-format restore correctly rejected"
 
   # Integration: restore from artifact (cross-job pack → upload → download → restore)
   test-restore-artifact:

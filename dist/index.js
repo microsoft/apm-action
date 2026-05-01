@@ -31660,6 +31660,1230 @@ module.exports = {
 
 /***/ }),
 
+/***/ 2744:
+/***/ ((__unused_webpack_module, __webpack_exports__, __nccwpck_require__) => {
+
+
+// EXPORTS
+__nccwpck_require__.d(__webpack_exports__, {
+  ly: () => (/* binding */ detectBundleFormat),
+  yB: () => (/* binding */ extractBundle),
+  UG: () => (/* binding */ resolveLocalBundle),
+  D5: () => (/* binding */ runPackStep)
+});
+
+// EXTERNAL MODULE: ./node_modules/@actions/core/lib/core.js + 8 modules
+var lib_core = __nccwpck_require__(6058);
+// EXTERNAL MODULE: ./node_modules/@actions/exec/lib/exec.js + 4 modules
+var exec = __nccwpck_require__(382);
+// EXTERNAL MODULE: external "fs"
+var external_fs_ = __nccwpck_require__(9896);
+;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-glob-options-helper.js
+
+/**
+ * Returns a copy with defaults filled in.
+ */
+function getOptions(copy) {
+    const result = {
+        followSymbolicLinks: true,
+        implicitDescendants: true,
+        matchDirectories: true,
+        omitBrokenSymbolicLinks: true,
+        excludeHiddenFiles: false
+    };
+    if (copy) {
+        if (typeof copy.followSymbolicLinks === 'boolean') {
+            result.followSymbolicLinks = copy.followSymbolicLinks;
+            lib_core/* debug */.Yz(`followSymbolicLinks '${result.followSymbolicLinks}'`);
+        }
+        if (typeof copy.implicitDescendants === 'boolean') {
+            result.implicitDescendants = copy.implicitDescendants;
+            lib_core/* debug */.Yz(`implicitDescendants '${result.implicitDescendants}'`);
+        }
+        if (typeof copy.matchDirectories === 'boolean') {
+            result.matchDirectories = copy.matchDirectories;
+            lib_core/* debug */.Yz(`matchDirectories '${result.matchDirectories}'`);
+        }
+        if (typeof copy.omitBrokenSymbolicLinks === 'boolean') {
+            result.omitBrokenSymbolicLinks = copy.omitBrokenSymbolicLinks;
+            lib_core/* debug */.Yz(`omitBrokenSymbolicLinks '${result.omitBrokenSymbolicLinks}'`);
+        }
+        if (typeof copy.excludeHiddenFiles === 'boolean') {
+            result.excludeHiddenFiles = copy.excludeHiddenFiles;
+            lib_core/* debug */.Yz(`excludeHiddenFiles '${result.excludeHiddenFiles}'`);
+        }
+    }
+    return result;
+}
+//# sourceMappingURL=internal-glob-options-helper.js.map
+// EXTERNAL MODULE: external "path"
+var external_path_ = __nccwpck_require__(6928);
+// EXTERNAL MODULE: external "assert"
+var external_assert_ = __nccwpck_require__(2613);
+;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-path-helper.js
+
+
+const IS_WINDOWS = process.platform === 'win32';
+/**
+ * Similar to path.dirname except normalizes the path separators and slightly better handling for Windows UNC paths.
+ *
+ * For example, on Linux/macOS:
+ * - `/               => /`
+ * - `/hello          => /`
+ *
+ * For example, on Windows:
+ * - `C:\             => C:\`
+ * - `C:\hello        => C:\`
+ * - `C:              => C:`
+ * - `C:hello         => C:`
+ * - `\               => \`
+ * - `\hello          => \`
+ * - `\\hello         => \\hello`
+ * - `\\hello\world   => \\hello\world`
+ */
+function dirname(p) {
+    // Normalize slashes and trim unnecessary trailing slash
+    p = safeTrimTrailingSeparator(p);
+    // Windows UNC root, e.g. \\hello or \\hello\world
+    if (IS_WINDOWS && /^\\\\[^\\]+(\\[^\\]+)?$/.test(p)) {
+        return p;
+    }
+    // Get dirname
+    let result = external_path_.dirname(p);
+    // Trim trailing slash for Windows UNC root, e.g. \\hello\world\
+    if (IS_WINDOWS && /^\\\\[^\\]+\\[^\\]+\\$/.test(result)) {
+        result = safeTrimTrailingSeparator(result);
+    }
+    return result;
+}
+/**
+ * Roots the path if not already rooted. On Windows, relative roots like `\`
+ * or `C:` are expanded based on the current working directory.
+ */
+function ensureAbsoluteRoot(root, itemPath) {
+    external_assert_(root, `ensureAbsoluteRoot parameter 'root' must not be empty`);
+    external_assert_(itemPath, `ensureAbsoluteRoot parameter 'itemPath' must not be empty`);
+    // Already rooted
+    if (hasAbsoluteRoot(itemPath)) {
+        return itemPath;
+    }
+    // Windows
+    if (IS_WINDOWS) {
+        // Check for itemPath like C: or C:foo
+        if (itemPath.match(/^[A-Z]:[^\\/]|^[A-Z]:$/i)) {
+            let cwd = process.cwd();
+            external_assert_(cwd.match(/^[A-Z]:\\/i), `Expected current directory to start with an absolute drive root. Actual '${cwd}'`);
+            // Drive letter matches cwd? Expand to cwd
+            if (itemPath[0].toUpperCase() === cwd[0].toUpperCase()) {
+                // Drive only, e.g. C:
+                if (itemPath.length === 2) {
+                    // Preserve specified drive letter case (upper or lower)
+                    return `${itemPath[0]}:\\${cwd.substr(3)}`;
+                }
+                // Drive + path, e.g. C:foo
+                else {
+                    if (!cwd.endsWith('\\')) {
+                        cwd += '\\';
+                    }
+                    // Preserve specified drive letter case (upper or lower)
+                    return `${itemPath[0]}:\\${cwd.substr(3)}${itemPath.substr(2)}`;
+                }
+            }
+            // Different drive
+            else {
+                return `${itemPath[0]}:\\${itemPath.substr(2)}`;
+            }
+        }
+        // Check for itemPath like \ or \foo
+        else if (normalizeSeparators(itemPath).match(/^\\$|^\\[^\\]/)) {
+            const cwd = process.cwd();
+            external_assert_(cwd.match(/^[A-Z]:\\/i), `Expected current directory to start with an absolute drive root. Actual '${cwd}'`);
+            return `${cwd[0]}:\\${itemPath.substr(1)}`;
+        }
+    }
+    external_assert_(hasAbsoluteRoot(root), `ensureAbsoluteRoot parameter 'root' must have an absolute root`);
+    // Otherwise ensure root ends with a separator
+    if (root.endsWith('/') || (IS_WINDOWS && root.endsWith('\\'))) {
+        // Intentionally empty
+    }
+    else {
+        // Append separator
+        root += external_path_.sep;
+    }
+    return root + itemPath;
+}
+/**
+ * On Linux/macOS, true if path starts with `/`. On Windows, true for paths like:
+ * `\\hello\share` and `C:\hello` (and using alternate separator).
+ */
+function hasAbsoluteRoot(itemPath) {
+    external_assert_(itemPath, `hasAbsoluteRoot parameter 'itemPath' must not be empty`);
+    // Normalize separators
+    itemPath = normalizeSeparators(itemPath);
+    // Windows
+    if (IS_WINDOWS) {
+        // E.g. \\hello\share or C:\hello
+        return itemPath.startsWith('\\\\') || /^[A-Z]:\\/i.test(itemPath);
+    }
+    // E.g. /hello
+    return itemPath.startsWith('/');
+}
+/**
+ * On Linux/macOS, true if path starts with `/`. On Windows, true for paths like:
+ * `\`, `\hello`, `\\hello\share`, `C:`, and `C:\hello` (and using alternate separator).
+ */
+function hasRoot(itemPath) {
+    external_assert_(itemPath, `isRooted parameter 'itemPath' must not be empty`);
+    // Normalize separators
+    itemPath = normalizeSeparators(itemPath);
+    // Windows
+    if (IS_WINDOWS) {
+        // E.g. \ or \hello or \\hello
+        // E.g. C: or C:\hello
+        return itemPath.startsWith('\\') || /^[A-Z]:/i.test(itemPath);
+    }
+    // E.g. /hello
+    return itemPath.startsWith('/');
+}
+/**
+ * Removes redundant slashes and converts `/` to `\` on Windows
+ */
+function normalizeSeparators(p) {
+    p = p || '';
+    // Windows
+    if (IS_WINDOWS) {
+        // Convert slashes on Windows
+        p = p.replace(/\//g, '\\');
+        // Remove redundant slashes
+        const isUnc = /^\\\\+[^\\]/.test(p); // e.g. \\hello
+        return (isUnc ? '\\' : '') + p.replace(/\\\\+/g, '\\'); // preserve leading \\ for UNC
+    }
+    // Remove redundant slashes
+    return p.replace(/\/\/+/g, '/');
+}
+/**
+ * Normalizes the path separators and trims the trailing separator (when safe).
+ * For example, `/foo/ => /foo` but `/ => /`
+ */
+function safeTrimTrailingSeparator(p) {
+    // Short-circuit if empty
+    if (!p) {
+        return '';
+    }
+    // Normalize separators
+    p = normalizeSeparators(p);
+    // No trailing slash
+    if (!p.endsWith(external_path_.sep)) {
+        return p;
+    }
+    // Check '/' on Linux/macOS and '\' on Windows
+    if (p === external_path_.sep) {
+        return p;
+    }
+    // On Windows check if drive root. E.g. C:\
+    if (IS_WINDOWS && /^[A-Z]:\\$/i.test(p)) {
+        return p;
+    }
+    // Otherwise trim trailing slash
+    return p.substr(0, p.length - 1);
+}
+//# sourceMappingURL=internal-path-helper.js.map
+;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-match-kind.js
+/**
+ * Indicates whether a pattern matches a path
+ */
+var MatchKind;
+(function (MatchKind) {
+    /** Not matched */
+    MatchKind[MatchKind["None"] = 0] = "None";
+    /** Matched if the path is a directory */
+    MatchKind[MatchKind["Directory"] = 1] = "Directory";
+    /** Matched if the path is a regular file */
+    MatchKind[MatchKind["File"] = 2] = "File";
+    /** Matched */
+    MatchKind[MatchKind["All"] = 3] = "All";
+})(MatchKind || (MatchKind = {}));
+//# sourceMappingURL=internal-match-kind.js.map
+;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-pattern-helper.js
+
+
+const internal_pattern_helper_IS_WINDOWS = process.platform === 'win32';
+/**
+ * Given an array of patterns, returns an array of paths to search.
+ * Duplicates and paths under other included paths are filtered out.
+ */
+function getSearchPaths(patterns) {
+    // Ignore negate patterns
+    patterns = patterns.filter(x => !x.negate);
+    // Create a map of all search paths
+    const searchPathMap = {};
+    for (const pattern of patterns) {
+        const key = internal_pattern_helper_IS_WINDOWS
+            ? pattern.searchPath.toUpperCase()
+            : pattern.searchPath;
+        searchPathMap[key] = 'candidate';
+    }
+    const result = [];
+    for (const pattern of patterns) {
+        // Check if already included
+        const key = internal_pattern_helper_IS_WINDOWS
+            ? pattern.searchPath.toUpperCase()
+            : pattern.searchPath;
+        if (searchPathMap[key] === 'included') {
+            continue;
+        }
+        // Check for an ancestor search path
+        let foundAncestor = false;
+        let tempKey = key;
+        let parent = dirname(tempKey);
+        while (parent !== tempKey) {
+            if (searchPathMap[parent]) {
+                foundAncestor = true;
+                break;
+            }
+            tempKey = parent;
+            parent = dirname(tempKey);
+        }
+        // Include the search pattern in the result
+        if (!foundAncestor) {
+            result.push(pattern.searchPath);
+            searchPathMap[key] = 'included';
+        }
+    }
+    return result;
+}
+/**
+ * Matches the patterns against the path
+ */
+function internal_pattern_helper_match(patterns, itemPath) {
+    let result = MatchKind.None;
+    for (const pattern of patterns) {
+        if (pattern.negate) {
+            result &= ~pattern.match(itemPath);
+        }
+        else {
+            result |= pattern.match(itemPath);
+        }
+    }
+    return result;
+}
+/**
+ * Checks whether to descend further into the directory
+ */
+function internal_pattern_helper_partialMatch(patterns, itemPath) {
+    return patterns.some(x => !x.negate && x.partialMatch(itemPath));
+}
+//# sourceMappingURL=internal-pattern-helper.js.map
+// EXTERNAL MODULE: external "os"
+var external_os_ = __nccwpck_require__(857);
+// EXTERNAL MODULE: ./node_modules/@actions/glob/node_modules/minimatch/minimatch.js
+var minimatch = __nccwpck_require__(9526);
+;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-path.js
+
+
+
+const internal_path_IS_WINDOWS = process.platform === 'win32';
+/**
+ * Helper class for parsing paths into segments
+ */
+class Path {
+    /**
+     * Constructs a Path
+     * @param itemPath Path or array of segments
+     */
+    constructor(itemPath) {
+        this.segments = [];
+        // String
+        if (typeof itemPath === 'string') {
+            external_assert_(itemPath, `Parameter 'itemPath' must not be empty`);
+            // Normalize slashes and trim unnecessary trailing slash
+            itemPath = safeTrimTrailingSeparator(itemPath);
+            // Not rooted
+            if (!hasRoot(itemPath)) {
+                this.segments = itemPath.split(external_path_.sep);
+            }
+            // Rooted
+            else {
+                // Add all segments, while not at the root
+                let remaining = itemPath;
+                let dir = dirname(remaining);
+                while (dir !== remaining) {
+                    // Add the segment
+                    const basename = external_path_.basename(remaining);
+                    this.segments.unshift(basename);
+                    // Truncate the last segment
+                    remaining = dir;
+                    dir = dirname(remaining);
+                }
+                // Remainder is the root
+                this.segments.unshift(remaining);
+            }
+        }
+        // Array
+        else {
+            // Must not be empty
+            external_assert_(itemPath.length > 0, `Parameter 'itemPath' must not be an empty array`);
+            // Each segment
+            for (let i = 0; i < itemPath.length; i++) {
+                let segment = itemPath[i];
+                // Must not be empty
+                external_assert_(segment, `Parameter 'itemPath' must not contain any empty segments`);
+                // Normalize slashes
+                segment = normalizeSeparators(itemPath[i]);
+                // Root segment
+                if (i === 0 && hasRoot(segment)) {
+                    segment = safeTrimTrailingSeparator(segment);
+                    external_assert_(segment === dirname(segment), `Parameter 'itemPath' root segment contains information for multiple segments`);
+                    this.segments.push(segment);
+                }
+                // All other segments
+                else {
+                    // Must not contain slash
+                    external_assert_(!segment.includes(external_path_.sep), `Parameter 'itemPath' contains unexpected path separators`);
+                    this.segments.push(segment);
+                }
+            }
+        }
+    }
+    /**
+     * Converts the path to it's string representation
+     */
+    toString() {
+        // First segment
+        let result = this.segments[0];
+        // All others
+        let skipSlash = result.endsWith(external_path_.sep) || (internal_path_IS_WINDOWS && /^[A-Z]:$/i.test(result));
+        for (let i = 1; i < this.segments.length; i++) {
+            if (skipSlash) {
+                skipSlash = false;
+            }
+            else {
+                result += external_path_.sep;
+            }
+            result += this.segments[i];
+        }
+        return result;
+    }
+}
+//# sourceMappingURL=internal-path.js.map
+;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-pattern.js
+
+
+
+
+
+
+
+const { Minimatch } = minimatch;
+const internal_pattern_IS_WINDOWS = process.platform === 'win32';
+class Pattern {
+    constructor(patternOrNegate, isImplicitPattern = false, segments, homedir) {
+        /**
+         * Indicates whether matches should be excluded from the result set
+         */
+        this.negate = false;
+        // Pattern overload
+        let pattern;
+        if (typeof patternOrNegate === 'string') {
+            pattern = patternOrNegate.trim();
+        }
+        // Segments overload
+        else {
+            // Convert to pattern
+            segments = segments || [];
+            external_assert_(segments.length, `Parameter 'segments' must not empty`);
+            const root = Pattern.getLiteral(segments[0]);
+            external_assert_(root && hasAbsoluteRoot(root), `Parameter 'segments' first element must be a root path`);
+            pattern = new Path(segments).toString().trim();
+            if (patternOrNegate) {
+                pattern = `!${pattern}`;
+            }
+        }
+        // Negate
+        while (pattern.startsWith('!')) {
+            this.negate = !this.negate;
+            pattern = pattern.substr(1).trim();
+        }
+        // Normalize slashes and ensures absolute root
+        pattern = Pattern.fixupPattern(pattern, homedir);
+        // Segments
+        this.segments = new Path(pattern).segments;
+        // Trailing slash indicates the pattern should only match directories, not regular files
+        this.trailingSeparator = normalizeSeparators(pattern)
+            .endsWith(external_path_.sep);
+        pattern = safeTrimTrailingSeparator(pattern);
+        // Search path (literal path prior to the first glob segment)
+        let foundGlob = false;
+        const searchSegments = this.segments
+            .map(x => Pattern.getLiteral(x))
+            .filter(x => !foundGlob && !(foundGlob = x === ''));
+        this.searchPath = new Path(searchSegments).toString();
+        // Root RegExp (required when determining partial match)
+        this.rootRegExp = new RegExp(Pattern.regExpEscape(searchSegments[0]), internal_pattern_IS_WINDOWS ? 'i' : '');
+        this.isImplicitPattern = isImplicitPattern;
+        // Create minimatch
+        const minimatchOptions = {
+            dot: true,
+            nobrace: true,
+            nocase: internal_pattern_IS_WINDOWS,
+            nocomment: true,
+            noext: true,
+            nonegate: true
+        };
+        pattern = internal_pattern_IS_WINDOWS ? pattern.replace(/\\/g, '/') : pattern;
+        this.minimatch = new Minimatch(pattern, minimatchOptions);
+    }
+    /**
+     * Matches the pattern against the specified path
+     */
+    match(itemPath) {
+        // Last segment is globstar?
+        if (this.segments[this.segments.length - 1] === '**') {
+            // Normalize slashes
+            itemPath = normalizeSeparators(itemPath);
+            // Append a trailing slash. Otherwise Minimatch will not match the directory immediately
+            // preceding the globstar. For example, given the pattern `/foo/**`, Minimatch returns
+            // false for `/foo` but returns true for `/foo/`. Append a trailing slash to handle that quirk.
+            if (!itemPath.endsWith(external_path_.sep) && this.isImplicitPattern === false) {
+                // Note, this is safe because the constructor ensures the pattern has an absolute root.
+                // For example, formats like C: and C:foo on Windows are resolved to an absolute root.
+                itemPath = `${itemPath}${external_path_.sep}`;
+            }
+        }
+        else {
+            // Normalize slashes and trim unnecessary trailing slash
+            itemPath = safeTrimTrailingSeparator(itemPath);
+        }
+        // Match
+        if (this.minimatch.match(itemPath)) {
+            return this.trailingSeparator ? MatchKind.Directory : MatchKind.All;
+        }
+        return MatchKind.None;
+    }
+    /**
+     * Indicates whether the pattern may match descendants of the specified path
+     */
+    partialMatch(itemPath) {
+        // Normalize slashes and trim unnecessary trailing slash
+        itemPath = safeTrimTrailingSeparator(itemPath);
+        // matchOne does not handle root path correctly
+        if (dirname(itemPath) === itemPath) {
+            return this.rootRegExp.test(itemPath);
+        }
+        return this.minimatch.matchOne(itemPath.split(internal_pattern_IS_WINDOWS ? /\\+/ : /\/+/), this.minimatch.set[0], true);
+    }
+    /**
+     * Escapes glob patterns within a path
+     */
+    static globEscape(s) {
+        return (internal_pattern_IS_WINDOWS ? s : s.replace(/\\/g, '\\\\')) // escape '\' on Linux/macOS
+            .replace(/(\[)(?=[^/]+\])/g, '[[]') // escape '[' when ']' follows within the path segment
+            .replace(/\?/g, '[?]') // escape '?'
+            .replace(/\*/g, '[*]'); // escape '*'
+    }
+    /**
+     * Normalizes slashes and ensures absolute root
+     */
+    static fixupPattern(pattern, homedir) {
+        // Empty
+        external_assert_(pattern, 'pattern cannot be empty');
+        // Must not contain `.` segment, unless first segment
+        // Must not contain `..` segment
+        const literalSegments = new Path(pattern).segments.map(x => Pattern.getLiteral(x));
+        external_assert_(literalSegments.every((x, i) => (x !== '.' || i === 0) && x !== '..'), `Invalid pattern '${pattern}'. Relative pathing '.' and '..' is not allowed.`);
+        // Must not contain globs in root, e.g. Windows UNC path \\foo\b*r
+        external_assert_(!hasRoot(pattern) || literalSegments[0], `Invalid pattern '${pattern}'. Root segment must not contain globs.`);
+        // Normalize slashes
+        pattern = normalizeSeparators(pattern);
+        // Replace leading `.` segment
+        if (pattern === '.' || pattern.startsWith(`.${external_path_.sep}`)) {
+            pattern = Pattern.globEscape(process.cwd()) + pattern.substr(1);
+        }
+        // Replace leading `~` segment
+        else if (pattern === '~' || pattern.startsWith(`~${external_path_.sep}`)) {
+            homedir = homedir || external_os_.homedir();
+            external_assert_(homedir, 'Unable to determine HOME directory');
+            external_assert_(hasAbsoluteRoot(homedir), `Expected HOME directory to be a rooted path. Actual '${homedir}'`);
+            pattern = Pattern.globEscape(homedir) + pattern.substr(1);
+        }
+        // Replace relative drive root, e.g. pattern is C: or C:foo
+        else if (internal_pattern_IS_WINDOWS &&
+            (pattern.match(/^[A-Z]:$/i) || pattern.match(/^[A-Z]:[^\\]/i))) {
+            let root = ensureAbsoluteRoot('C:\\dummy-root', pattern.substr(0, 2));
+            if (pattern.length > 2 && !root.endsWith('\\')) {
+                root += '\\';
+            }
+            pattern = Pattern.globEscape(root) + pattern.substr(2);
+        }
+        // Replace relative root, e.g. pattern is \ or \foo
+        else if (internal_pattern_IS_WINDOWS && (pattern === '\\' || pattern.match(/^\\[^\\]/))) {
+            let root = ensureAbsoluteRoot('C:\\dummy-root', '\\');
+            if (!root.endsWith('\\')) {
+                root += '\\';
+            }
+            pattern = Pattern.globEscape(root) + pattern.substr(1);
+        }
+        // Otherwise ensure absolute root
+        else {
+            pattern = ensureAbsoluteRoot(Pattern.globEscape(process.cwd()), pattern);
+        }
+        return normalizeSeparators(pattern);
+    }
+    /**
+     * Attempts to unescape a pattern segment to create a literal path segment.
+     * Otherwise returns empty string.
+     */
+    static getLiteral(segment) {
+        let literal = '';
+        for (let i = 0; i < segment.length; i++) {
+            const c = segment[i];
+            // Escape
+            if (c === '\\' && !internal_pattern_IS_WINDOWS && i + 1 < segment.length) {
+                literal += segment[++i];
+                continue;
+            }
+            // Wildcard
+            else if (c === '*' || c === '?') {
+                return '';
+            }
+            // Character set
+            else if (c === '[' && i + 1 < segment.length) {
+                let set = '';
+                let closed = -1;
+                for (let i2 = i + 1; i2 < segment.length; i2++) {
+                    const c2 = segment[i2];
+                    // Escape
+                    if (c2 === '\\' && !internal_pattern_IS_WINDOWS && i2 + 1 < segment.length) {
+                        set += segment[++i2];
+                        continue;
+                    }
+                    // Closed
+                    else if (c2 === ']') {
+                        closed = i2;
+                        break;
+                    }
+                    // Otherwise
+                    else {
+                        set += c2;
+                    }
+                }
+                // Closed?
+                if (closed >= 0) {
+                    // Cannot convert
+                    if (set.length > 1) {
+                        return '';
+                    }
+                    // Convert to literal
+                    if (set) {
+                        literal += set;
+                        i = closed;
+                        continue;
+                    }
+                }
+                // Otherwise fall thru
+            }
+            // Append
+            literal += c;
+        }
+        return literal;
+    }
+    /**
+     * Escapes regexp special characters
+     * https://javascript.info/regexp-escaping
+     */
+    static regExpEscape(s) {
+        return s.replace(/[[\\^$.|?*+()]/g, '\\$&');
+    }
+}
+//# sourceMappingURL=internal-pattern.js.map
+;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-search-state.js
+class SearchState {
+    constructor(path, level) {
+        this.path = path;
+        this.level = level;
+    }
+}
+//# sourceMappingURL=internal-search-state.js.map
+;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-globber.js
+var __awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var __asyncValues = (undefined && undefined.__asyncValues) || function (o) {
+    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+    var m = o[Symbol.asyncIterator], i;
+    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
+    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
+    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
+};
+var __await = (undefined && undefined.__await) || function (v) { return this instanceof __await ? (this.v = v, this) : new __await(v); }
+var __asyncGenerator = (undefined && undefined.__asyncGenerator) || function (thisArg, _arguments, generator) {
+    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+    var g = generator.apply(thisArg, _arguments || []), i, q = [];
+    return i = Object.create((typeof AsyncIterator === "function" ? AsyncIterator : Object).prototype), verb("next"), verb("throw"), verb("return", awaitReturn), i[Symbol.asyncIterator] = function () { return this; }, i;
+    function awaitReturn(f) { return function (v) { return Promise.resolve(v).then(f, reject); }; }
+    function verb(n, f) { if (g[n]) { i[n] = function (v) { return new Promise(function (a, b) { q.push([n, v, a, b]) > 1 || resume(n, v); }); }; if (f) i[n] = f(i[n]); } }
+    function resume(n, v) { try { step(g[n](v)); } catch (e) { settle(q[0][3], e); } }
+    function step(r) { r.value instanceof __await ? Promise.resolve(r.value.v).then(fulfill, reject) : settle(q[0][2], r); }
+    function fulfill(value) { resume("next", value); }
+    function reject(value) { resume("throw", value); }
+    function settle(f, v) { if (f(v), q.shift(), q.length) resume(q[0][0], q[0][1]); }
+};
+
+
+
+
+
+
+
+
+const internal_globber_IS_WINDOWS = process.platform === 'win32';
+class DefaultGlobber {
+    constructor(options) {
+        this.patterns = [];
+        this.searchPaths = [];
+        this.options = getOptions(options);
+    }
+    getSearchPaths() {
+        // Return a copy
+        return this.searchPaths.slice();
+    }
+    glob() {
+        return __awaiter(this, void 0, void 0, function* () {
+            var _a, e_1, _b, _c;
+            const result = [];
+            try {
+                for (var _d = true, _e = __asyncValues(this.globGenerator()), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
+                    _c = _f.value;
+                    _d = false;
+                    const itemPath = _c;
+                    result.push(itemPath);
+                }
+            }
+            catch (e_1_1) { e_1 = { error: e_1_1 }; }
+            finally {
+                try {
+                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
+                }
+                finally { if (e_1) throw e_1.error; }
+            }
+            return result;
+        });
+    }
+    globGenerator() {
+        return __asyncGenerator(this, arguments, function* globGenerator_1() {
+            // Fill in defaults options
+            const options = getOptions(this.options);
+            // Implicit descendants?
+            const patterns = [];
+            for (const pattern of this.patterns) {
+                patterns.push(pattern);
+                if (options.implicitDescendants &&
+                    (pattern.trailingSeparator ||
+                        pattern.segments[pattern.segments.length - 1] !== '**')) {
+                    patterns.push(new Pattern(pattern.negate, true, pattern.segments.concat('**')));
+                }
+            }
+            // Push the search paths
+            const stack = [];
+            for (const searchPath of getSearchPaths(patterns)) {
+                lib_core/* debug */.Yz(`Search path '${searchPath}'`);
+                // Exists?
+                try {
+                    // Intentionally using lstat. Detection for broken symlink
+                    // will be performed later (if following symlinks).
+                    yield __await(external_fs_.promises.lstat(searchPath));
+                }
+                catch (err) {
+                    if (err.code === 'ENOENT') {
+                        continue;
+                    }
+                    throw err;
+                }
+                stack.unshift(new SearchState(searchPath, 1));
+            }
+            // Search
+            const traversalChain = []; // used to detect cycles
+            while (stack.length) {
+                // Pop
+                const item = stack.pop();
+                // Match?
+                const match = internal_pattern_helper_match(patterns, item.path);
+                const partialMatch = !!match || internal_pattern_helper_partialMatch(patterns, item.path);
+                if (!match && !partialMatch) {
+                    continue;
+                }
+                // Stat
+                const stats = yield __await(DefaultGlobber.stat(item, options, traversalChain)
+                // Broken symlink, or symlink cycle detected, or no longer exists
+                );
+                // Broken symlink, or symlink cycle detected, or no longer exists
+                if (!stats) {
+                    continue;
+                }
+                // Hidden file or directory?
+                if (options.excludeHiddenFiles && external_path_.basename(item.path).match(/^\./)) {
+                    continue;
+                }
+                // Directory
+                if (stats.isDirectory()) {
+                    // Matched
+                    if (match & MatchKind.Directory && options.matchDirectories) {
+                        yield yield __await(item.path);
+                    }
+                    // Descend?
+                    else if (!partialMatch) {
+                        continue;
+                    }
+                    // Push the child items in reverse
+                    const childLevel = item.level + 1;
+                    const childItems = (yield __await(external_fs_.promises.readdir(item.path))).map(x => new SearchState(external_path_.join(item.path, x), childLevel));
+                    stack.push(...childItems.reverse());
+                }
+                // File
+                else if (match & MatchKind.File) {
+                    yield yield __await(item.path);
+                }
+            }
+        });
+    }
+    /**
+     * Constructs a DefaultGlobber
+     */
+    static create(patterns, options) {
+        return __awaiter(this, void 0, void 0, function* () {
+            const result = new DefaultGlobber(options);
+            if (internal_globber_IS_WINDOWS) {
+                patterns = patterns.replace(/\r\n/g, '\n');
+                patterns = patterns.replace(/\r/g, '\n');
+            }
+            const lines = patterns.split('\n').map(x => x.trim());
+            for (const line of lines) {
+                // Empty or comment
+                if (!line || line.startsWith('#')) {
+                    continue;
+                }
+                // Pattern
+                else {
+                    result.patterns.push(new Pattern(line));
+                }
+            }
+            result.searchPaths.push(...getSearchPaths(result.patterns));
+            return result;
+        });
+    }
+    static stat(item, options, traversalChain) {
+        return __awaiter(this, void 0, void 0, function* () {
+            // Note:
+            // `stat` returns info about the target of a symlink (or symlink chain)
+            // `lstat` returns info about a symlink itself
+            let stats;
+            if (options.followSymbolicLinks) {
+                try {
+                    // Use `stat` (following symlinks)
+                    stats = yield external_fs_.promises.stat(item.path);
+                }
+                catch (err) {
+                    if (err.code === 'ENOENT') {
+                        if (options.omitBrokenSymbolicLinks) {
+                            lib_core/* debug */.Yz(`Broken symlink '${item.path}'`);
+                            return undefined;
+                        }
+                        throw new Error(`No information found for the path '${item.path}'. This may indicate a broken symbolic link.`);
+                    }
+                    throw err;
+                }
+            }
+            else {
+                // Use `lstat` (not following symlinks)
+                stats = yield external_fs_.promises.lstat(item.path);
+            }
+            // Note, isDirectory() returns false for the lstat of a symlink
+            if (stats.isDirectory() && options.followSymbolicLinks) {
+                // Get the realpath
+                const realPath = yield external_fs_.promises.realpath(item.path);
+                // Fixup the traversal chain to match the item level
+                while (traversalChain.length >= item.level) {
+                    traversalChain.pop();
+                }
+                // Test for a cycle
+                if (traversalChain.some((x) => x === realPath)) {
+                    lib_core/* debug */.Yz(`Symlink cycle detected for path '${item.path}' and realpath '${realPath}'`);
+                    return undefined;
+                }
+                // Update the traversal chain
+                traversalChain.push(realPath);
+            }
+            return stats;
+        });
+    }
+}
+//# sourceMappingURL=internal-globber.js.map
+// EXTERNAL MODULE: external "crypto"
+var external_crypto_ = __nccwpck_require__(6982);
+// EXTERNAL MODULE: external "stream"
+var external_stream_ = __nccwpck_require__(2203);
+// EXTERNAL MODULE: external "util"
+var external_util_ = __nccwpck_require__(9023);
+;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-hash-files.js
+var internal_hash_files_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var internal_hash_files_asyncValues = (undefined && undefined.__asyncValues) || function (o) {
+    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
+    var m = o[Symbol.asyncIterator], i;
+    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
+    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
+    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
+};
+
+
+
+
+
+
+function hashFiles(globber_1, currentWorkspace_1) {
+    return internal_hash_files_awaiter(this, arguments, void 0, function* (globber, currentWorkspace, verbose = false) {
+        var _a, e_1, _b, _c;
+        var _d;
+        const writeDelegate = verbose ? core.info : core.debug;
+        let hasMatch = false;
+        const githubWorkspace = currentWorkspace
+            ? currentWorkspace
+            : ((_d = process.env['GITHUB_WORKSPACE']) !== null && _d !== void 0 ? _d : process.cwd());
+        const result = crypto.createHash('sha256');
+        let count = 0;
+        try {
+            for (var _e = true, _f = internal_hash_files_asyncValues(globber.globGenerator()), _g; _g = yield _f.next(), _a = _g.done, !_a; _e = true) {
+                _c = _g.value;
+                _e = false;
+                const file = _c;
+                writeDelegate(file);
+                if (!file.startsWith(`${githubWorkspace}${path.sep}`)) {
+                    writeDelegate(`Ignore '${file}' since it is not under GITHUB_WORKSPACE.`);
+                    continue;
+                }
+                if (fs.statSync(file).isDirectory()) {
+                    writeDelegate(`Skip directory '${file}'.`);
+                    continue;
+                }
+                const hash = crypto.createHash('sha256');
+                const pipeline = util.promisify(stream.pipeline);
+                yield pipeline(fs.createReadStream(file), hash);
+                result.write(hash.digest());
+                count++;
+                if (!hasMatch) {
+                    hasMatch = true;
+                }
+            }
+        }
+        catch (e_1_1) { e_1 = { error: e_1_1 }; }
+        finally {
+            try {
+                if (!_e && !_a && (_b = _f.return)) yield _b.call(_f);
+            }
+            finally { if (e_1) throw e_1.error; }
+        }
+        result.end();
+        if (hasMatch) {
+            writeDelegate(`Found ${count} files to hash.`);
+            return result.digest('hex');
+        }
+        else {
+            writeDelegate(`No matches found for glob`);
+            return '';
+        }
+    });
+}
+//# sourceMappingURL=internal-hash-files.js.map
+;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/glob.js
+var glob_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+
+
+/**
+ * Constructs a globber
+ *
+ * @param patterns  Patterns separated by newlines
+ * @param options   Glob options
+ */
+function create(patterns, options) {
+    return glob_awaiter(this, void 0, void 0, function* () {
+        return yield DefaultGlobber.create(patterns, options);
+    });
+}
+/**
+ * Computes the sha256 hash of a glob
+ *
+ * @param patterns  Patterns separated by newlines
+ * @param currentWorkspace  Workspace used when matching files
+ * @param options   Glob options
+ * @param verbose   Enables verbose logging
+ */
+function glob_hashFiles(patterns_1) {
+    return glob_awaiter(this, arguments, void 0, function* (patterns, currentWorkspace = '', options, verbose = false) {
+        let followSymbolicLinks = true;
+        if (options && typeof options.followSymbolicLinks === 'boolean') {
+            followSymbolicLinks = options.followSymbolicLinks;
+        }
+        const globber = yield create(patterns, { followSymbolicLinks });
+        return _hashFiles(globber, currentWorkspace, verbose);
+    });
+}
+//# sourceMappingURL=glob.js.map
+;// CONCATENATED MODULE: ./src/bundler.ts
+
+
+
+
+
+/**
+ * Resolve a local bundle path (may contain glob patterns) to a single file.
+ * Errors if zero or multiple files match.
+ */
+async function resolveLocalBundle(pattern, workspaceDir) {
+    const resolvedWorkspace = external_path_.resolve(workspaceDir);
+    // If the pattern is an absolute path without globs, use it directly
+    const resolvedPattern = external_path_.isAbsolute(pattern) ? pattern : external_path_.join(resolvedWorkspace, pattern);
+    const globber = await create(resolvedPattern, { followSymbolicLinks: false });
+    const matches = await globber.glob();
+    if (matches.length === 0) {
+        throw new Error(`No bundle found matching: ${pattern}`);
+    }
+    if (matches.length > 1) {
+        const list = matches.map(m => external_path_.relative(resolvedWorkspace, m)).join(', ');
+        throw new Error(`Multiple bundles match '${pattern}': ${list}. Use an exact path.`);
+    }
+    const resolvedBundle = external_path_.resolve(matches[0]);
+    // Path traversal protection for relative patterns: ensure resolved path stays
+    // within the workspace. Absolute patterns are user-explicit and not checked —
+    // the user intentionally specified a location (e.g. /tmp/gh-aw/apm-bundle/).
+    if (!external_path_.isAbsolute(pattern)) {
+        const relative = external_path_.relative(resolvedWorkspace, resolvedBundle);
+        if (relative.startsWith('..') || external_path_.isAbsolute(relative)) {
+            throw new Error(`Bundle path "${pattern}" resolves outside the workspace`);
+        }
+    }
+    return resolvedBundle;
+}
+/**
+ * Inspect a bundle archive to determine its format without extracting it.
+ *
+ * Reads the tar table-of-contents (`tar tzf`) and looks for the format
+ * markers:
+ *   - APM bundle: `apm.lock.yaml` (lockfile-driven, .github/.claude trees)
+ *   - Plugin bundle: `plugin.json` at the bundle root (Claude Code marketplace
+ *     layout, flat agents/skills/commands/instructions/ dirs, no lockfile)
+ *
+ * Returns the detected format. Throws if neither marker is present, or if
+ * BOTH are present (ambiguous archive -- almost certainly a build error).
+ *
+ * Bundles always have a single top-level wrapper directory (the package
+ * versioned dir, e.g. `pack-test-1.0.0/`). We accept the marker at any depth
+ * inside the wrapper to stay tolerant of archive shape changes.
+ */
+async function detectBundleFormat(bundlePath) {
+    const list = await exec/* getExecOutput */.H('tar', ['tzf', bundlePath], {
+        ignoreReturnCode: true,
+        silent: true,
+    });
+    if (list.exitCode !== 0) {
+        throw new Error(`Failed to list bundle contents (tar tzf exit ${list.exitCode}): `
+            + (list.stderr.trim() || 'unknown error'));
+    }
+    const entries = list.stdout.split('\n').map(l => l.trim()).filter(Boolean);
+    const hasLockfile = entries.some(e => /(^|\/)apm\.lock\.yaml$/.test(e));
+    const hasPluginJson = entries.some(e => /(^|\/)plugin\.json$/.test(e));
+    if (hasLockfile && hasPluginJson) {
+        throw new Error(`Bundle ${external_path_.basename(bundlePath)} contains both apm.lock.yaml and plugin.json -- `
+            + `ambiguous format. Re-pack with a single --format value.`);
+    }
+    if (hasLockfile)
+        return 'apm';
+    if (hasPluginJson)
+        return 'plugin';
+    throw new Error(`Bundle ${external_path_.basename(bundlePath)} contains neither apm.lock.yaml nor plugin.json. `
+        + `Cannot determine bundle format -- the archive may be corrupt or produced by an `
+        + `unsupported tool.`);
+}
+async function extractBundle(bundlePath, outputDir) {
+    const resolvedBundle = external_path_.resolve(bundlePath);
+    const resolvedOutput = external_path_.resolve(outputDir);
+    if (!external_fs_.existsSync(resolvedBundle)) {
+        throw new Error(`Bundle not found: ${bundlePath}`);
+    }
+    // Detect the bundle format up-front. Plugin-format restore is rejected with
+    // a clear message: deploying plugin bundles into a workspace is a different
+    // contract (no lockfile to drive deployed_files, files land at workspace
+    // root, plugin.json may collide with project files). That belongs in
+    // `apm unpack` upstream, not here. See PR description for the deferred RFC.
+    const format = await detectBundleFormat(resolvedBundle);
+    if (format === 'plugin') {
+        throw new Error(`Plugin-format bundle restore is not yet supported by this action. `
+            + `The bundle at ${external_path_.basename(bundlePath)} was packed with --format plugin `
+            + `(no apm.lock.yaml, flat plugin layout). Either:\n`
+            + `  - Re-pack the bundle with bundle-format: apm (or 'apm pack --format apm'), or\n`
+            + `  - Restore the plugin bundle yourself using your plugin tooling.\n`
+            + `Tracking: plugin-bundle restore is planned via 'apm unpack' upstream.`);
+    }
+    // APM-format path: prefer `apm unpack` (provides verification),
+    // fall back to `tar xzf` if APM is unavailable.
+    const apmAvailable = await exec/* exec */.m('apm', ['--version'], {
+        ignoreReturnCode: true,
+        silent: true,
+    }).catch(() => 1) === 0;
+    if (apmAvailable) {
+        lib_core/* info */.pq('Using apm unpack (with verification)...');
+        const rc = await exec/* exec */.m('apm', ['unpack', resolvedBundle, '-o', resolvedOutput], {
+            ignoreReturnCode: true,
+        });
+        if (rc !== 0) {
+            throw new Error(`apm unpack failed with exit code ${rc}`);
+        }
+        const files = countDeployedFiles(resolvedOutput);
+        return { files, verified: true, format };
+    }
+    // Fallback: tar extraction.
+    //
+    // Defense-in-depth: even if this path ever runs again (e.g. if a future
+    // change reintroduces a "skip apm install" mode, or apm install transiently
+    // fails), exclude the lockfile + manifest. They are bundle metadata, not
+    // deployable output -- the same files that `apm unpack` (the primary path)
+    // intentionally never copies. Leaking them into a git checkout dirties the
+    // workspace and breaks downstream `git checkout` steps. See microsoft/apm-action#26.
+    lib_core/* info */.pq('APM not available -- extracting with tar (no verification)...');
+    const rc = await exec/* exec */.m('tar', [
+        'xzf', resolvedBundle,
+        '-C', resolvedOutput,
+        '--strip-components=1',
+        '--exclude=apm.lock.yaml',
+        '--exclude=apm.lock',
+        '--exclude=apm.yml',
+    ], {
+        ignoreReturnCode: true,
+    });
+    if (rc !== 0) {
+        throw new Error(`tar extraction failed with exit code ${rc}`);
+    }
+    const files = countDeployedFiles(resolvedOutput);
+    return { files, verified: false, format };
+}
+/**
+ * Run `apm pack` after install and return the path to the produced bundle
+ * along with the format that was used.
+ */
+async function runPackStep(workingDir, opts) {
+    const resolvedDir = external_path_.resolve(workingDir);
+    const buildDir = external_path_.join(resolvedDir, 'build');
+    // Always pass --format explicitly so this action's behavior is robust to
+    // any future change in the apm CLI's default. The action's contract is
+    // the action's, not the CLI's.
+    const args = ['pack', '-o', buildDir, '--format', opts.format];
+    if (opts.target) {
+        args.push('--target', opts.target);
+    }
+    if (opts.archive) {
+        args.push('--archive');
+    }
+    lib_core/* info */.pq(`Running: apm ${args.join(' ')}`);
+    const rc = await exec/* exec */.m('apm', args, {
+        cwd: resolvedDir,
+        ignoreReturnCode: true,
+        env: { ...process.env },
+    });
+    if (rc !== 0) {
+        throw new Error(`apm pack failed with exit code ${rc}`);
+    }
+    // Find the produced bundle in build/
+    const bundlePath = findBundle(buildDir, opts.archive);
+    lib_core/* info */.pq(`Bundle produced: ${bundlePath}`);
+    return { bundlePath, format: opts.format };
+}
+/**
+ * Find the bundle output in the build directory.
+ * For archives: look for .tar.gz files.
+ * For directories: look for non-hidden directories.
+ */
+function findBundle(buildDir, archive) {
+    if (!external_fs_.existsSync(buildDir)) {
+        throw new Error(`Build directory not found: ${buildDir}`);
+    }
+    const entries = external_fs_.readdirSync(buildDir);
+    if (archive) {
+        const archives = entries.filter(e => e.endsWith('.tar.gz')).sort();
+        if (archives.length === 0) {
+            throw new Error('No .tar.gz archive found in build directory after apm pack');
+        }
+        if (archives.length > 1) {
+            throw new Error(`Multiple .tar.gz archives found in build directory after apm pack: ${archives.join(', ')}`);
+        }
+        return external_path_.join(buildDir, archives[0]);
+    }
+    // Directory mode: find the first non-hidden directory
+    const dirs = entries.filter(e => {
+        if (e.startsWith('.'))
+            return false;
+        return external_fs_.statSync(external_path_.join(buildDir, e)).isDirectory();
+    }).sort();
+    if (dirs.length === 0) {
+        throw new Error('No bundle directory found in build directory after apm pack');
+    }
+    if (dirs.length > 1) {
+        throw new Error(`Multiple bundle directories found in build directory after apm pack: ${dirs.join(', ')}`);
+    }
+    return external_path_.join(buildDir, dirs[0]);
+}
+/**
+ * Count deployed primitive files under .github/ for reporting.
+ */
+function countDeployedFiles(rootDir) {
+    const githubDir = external_path_.join(rootDir, '.github');
+    const claudeDir = external_path_.join(rootDir, '.claude');
+    let count = 0;
+    for (const dir of [githubDir, claudeDir]) {
+        if (external_fs_.existsSync(dir)) {
+            count += countFilesRecursive(dir);
+        }
+    }
+    return count;
+}
+function countFilesRecursive(dir) {
+    let count = 0;
+    for (const entry of external_fs_.readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name.startsWith('.'))
+            continue;
+        const fullPath = external_path_.join(dir, entry.name);
+        if (entry.isDirectory()) {
+            count += countFilesRecursive(fullPath);
+        }
+        else {
+            count++;
+        }
+    }
+    return count;
+}
+
+
+/***/ }),
+
 /***/ 2613:
 /***/ ((module) => {
 
@@ -31867,6 +33091,13 @@ module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("os");
 /***/ ((module) => {
 
 module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("path");
+
+/***/ }),
+
+/***/ 2203:
+/***/ ((module) => {
+
+module.exports = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("stream");
 
 /***/ }),
 
@@ -39532,8 +40763,8 @@ function _readLinuxVersionFile() {
 //# sourceMappingURL=manifest.js.map
 // EXTERNAL MODULE: ./node_modules/@actions/http-client/lib/index.js + 1 modules
 var lib = __nccwpck_require__(4942);
-;// CONCATENATED MODULE: external "stream"
-const external_stream_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("stream");
+// EXTERNAL MODULE: external "stream"
+var external_stream_ = __nccwpck_require__(2203);
 // EXTERNAL MODULE: external "util"
 var external_util_ = __nccwpck_require__(9023);
 ;// CONCATENATED MODULE: ./node_modules/@actions/tool-cache/lib/retry-helper.js
@@ -39689,7 +40920,7 @@ function downloadToolAttempt(url, dest, auth, headers) {
             throw err;
         }
         // Download the response body
-        const pipeline = external_util_.promisify(external_stream_namespaceObject.pipeline);
+        const pipeline = external_util_.promisify(external_stream_.pipeline);
         const responseMessageFactory = _getGlobal('TEST_DOWNLOAD_TOOL_RESPONSE_MESSAGE_FACTORY', () => response.message);
         const readStream = responseMessageFactory();
         let succeeded = false;
@@ -40287,19 +41518,50 @@ async function resolveDownloadUrl(version) {
     };
 }
 /**
+ * Resolve the version reported by an apm binary that is already on PATH.
+ * Returns the cleaned version string (no leading 'v'), or null if apm is not
+ * available or the probe failed.
+ */
+async function probePathVersion() {
+    try {
+        const result = await lib_exec/* getExecOutput */.H('apm', ['--version'], {
+            ignoreReturnCode: true,
+            silent: true,
+        });
+        if (result.exitCode !== 0)
+            return null;
+        // `apm --version` prints e.g. "apm 0.11.0" or "0.11.0" depending on build.
+        const match = /(\d+\.\d+\.\d+\S*)/.exec(result.stdout);
+        return match ? match[1] : null;
+    }
+    catch {
+        return null;
+    }
+}
+/**
  * Ensure APM CLI is installed and available on the runner.
  * Uses @actions/tool-cache for downloading, extracting, and caching.
+ *
+ * Version semantics:
+ *   - `apm-version: latest` -- if any apm is already on PATH, reuse it; else
+ *     resolve the latest GitHub release and install via tool-cache.
+ *   - `apm-version: <pinned>` -- always install the requested version into the
+ *     tool-cache (or reuse a tool-cache hit). Never short-circuits to a random
+ *     apm that happens to be on PATH; the caller asked for a specific version
+ *     and gets that version.
  */
 async function ensureApmInstalled() {
-    const apmVersion = lib_core/* getInput */.V4('apm-version') || 'latest';
-    // Check if already available
-    const rc = await lib_exec/* exec */.m('apm', ['--version'], { ignoreReturnCode: true, silent: true }).catch(() => 1);
-    if (rc === 0) {
-        lib_core/* info */.pq('APM already installed');
-        return;
+    const apmVersionInput = (lib_core/* getInput */.V4('apm-version') || 'latest').trim();
+    const wantLatest = apmVersionInput === 'latest' || apmVersionInput === '';
+    if (wantLatest) {
+        const pathVersion = await probePathVersion();
+        if (pathVersion) {
+            lib_core/* info */.pq(`APM ${pathVersion} already available on PATH (apm-version: latest)`);
+            return { resolvedVersion: pathVersion, toolDir: '', binaryPath: '' };
+        }
     }
-    lib_core/* info */.pq(`Installing APM (version: ${apmVersion})...`);
-    const { url, resolvedVersion } = await resolveDownloadUrl(apmVersion);
+    lib_core/* info */.pq(`Installing APM (version: ${apmVersionInput})...`);
+    const { url, resolvedVersion } = await resolveDownloadUrl(apmVersionInput);
     const suffix = getAssetSuffix();
     // Check tool-cache first
     let toolDir = find('apm', resolvedVersion);
@@ -40322,1145 +41584,12 @@ async function ensureApmInstalled() {
         throw new Error('APM installation verification failed');
     }
     lib_core/* info */.pq(`APM ${resolvedVersion} installed successfully`);
+    const binaryPath = external_path_.join(toolDir, 'apm');
+    return { resolvedVersion, toolDir, binaryPath };
 }
 
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-glob-options-helper.js
-
-/**
- * Returns a copy with defaults filled in.
- */
-function getOptions(copy) {
-    const result = {
-        followSymbolicLinks: true,
-        implicitDescendants: true,
-        matchDirectories: true,
-        omitBrokenSymbolicLinks: true,
-        excludeHiddenFiles: false
-    };
-    if (copy) {
-        if (typeof copy.followSymbolicLinks === 'boolean') {
-            result.followSymbolicLinks = copy.followSymbolicLinks;
-            lib_core/* debug */.Yz(`followSymbolicLinks '${result.followSymbolicLinks}'`);
-        }
-        if (typeof copy.implicitDescendants === 'boolean') {
-            result.implicitDescendants = copy.implicitDescendants;
-            lib_core/* debug */.Yz(`implicitDescendants '${result.implicitDescendants}'`);
-        }
-        if (typeof copy.matchDirectories === 'boolean') {
-            result.matchDirectories = copy.matchDirectories;
-            lib_core/* debug */.Yz(`matchDirectories '${result.matchDirectories}'`);
-        }
-        if (typeof copy.omitBrokenSymbolicLinks === 'boolean') {
-            result.omitBrokenSymbolicLinks = copy.omitBrokenSymbolicLinks;
-            lib_core/* debug */.Yz(`omitBrokenSymbolicLinks '${result.omitBrokenSymbolicLinks}'`);
-        }
-        if (typeof copy.excludeHiddenFiles === 'boolean') {
-            result.excludeHiddenFiles = copy.excludeHiddenFiles;
-            lib_core/* debug */.Yz(`excludeHiddenFiles '${result.excludeHiddenFiles}'`);
-        }
-    }
-    return result;
-}
-//# sourceMappingURL=internal-glob-options-helper.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-path-helper.js
-
-
-const internal_path_helper_IS_WINDOWS = process.platform === 'win32';
-/**
- * Similar to path.dirname except normalizes the path separators and slightly better handling for Windows UNC paths.
- *
- * For example, on Linux/macOS:
- * - `/               => /`
- * - `/hello          => /`
- *
- * For example, on Windows:
- * - `C:\             => C:\`
- * - `C:\hello        => C:\`
- * - `C:              => C:`
- * - `C:hello         => C:`
- * - `\               => \`
- * - `\hello          => \`
- * - `\\hello         => \\hello`
- * - `\\hello\world   => \\hello\world`
- */
-function dirname(p) {
-    // Normalize slashes and trim unnecessary trailing slash
-    p = safeTrimTrailingSeparator(p);
-    // Windows UNC root, e.g. \\hello or \\hello\world
-    if (internal_path_helper_IS_WINDOWS && /^\\\\[^\\]+(\\[^\\]+)?$/.test(p)) {
-        return p;
-    }
-    // Get dirname
-    let result = external_path_.dirname(p);
-    // Trim trailing slash for Windows UNC root, e.g. \\hello\world\
-    if (internal_path_helper_IS_WINDOWS && /^\\\\[^\\]+\\[^\\]+\\$/.test(result)) {
-        result = safeTrimTrailingSeparator(result);
-    }
-    return result;
-}
-/**
- * Roots the path if not already rooted. On Windows, relative roots like `\`
- * or `C:` are expanded based on the current working directory.
- */
-function ensureAbsoluteRoot(root, itemPath) {
-    external_assert_(root, `ensureAbsoluteRoot parameter 'root' must not be empty`);
-    external_assert_(itemPath, `ensureAbsoluteRoot parameter 'itemPath' must not be empty`);
-    // Already rooted
-    if (hasAbsoluteRoot(itemPath)) {
-        return itemPath;
-    }
-    // Windows
-    if (internal_path_helper_IS_WINDOWS) {
-        // Check for itemPath like C: or C:foo
-        if (itemPath.match(/^[A-Z]:[^\\/]|^[A-Z]:$/i)) {
-            let cwd = process.cwd();
-            external_assert_(cwd.match(/^[A-Z]:\\/i), `Expected current directory to start with an absolute drive root. Actual '${cwd}'`);
-            // Drive letter matches cwd? Expand to cwd
-            if (itemPath[0].toUpperCase() === cwd[0].toUpperCase()) {
-                // Drive only, e.g. C:
-                if (itemPath.length === 2) {
-                    // Preserve specified drive letter case (upper or lower)
-                    return `${itemPath[0]}:\\${cwd.substr(3)}`;
-                }
-                // Drive + path, e.g. C:foo
-                else {
-                    if (!cwd.endsWith('\\')) {
-                        cwd += '\\';
-                    }
-                    // Preserve specified drive letter case (upper or lower)
-                    return `${itemPath[0]}:\\${cwd.substr(3)}${itemPath.substr(2)}`;
-                }
-            }
-            // Different drive
-            else {
-                return `${itemPath[0]}:\\${itemPath.substr(2)}`;
-            }
-        }
-        // Check for itemPath like \ or \foo
-        else if (internal_path_helper_normalizeSeparators(itemPath).match(/^\\$|^\\[^\\]/)) {
-            const cwd = process.cwd();
-            external_assert_(cwd.match(/^[A-Z]:\\/i), `Expected current directory to start with an absolute drive root. Actual '${cwd}'`);
-            return `${cwd[0]}:\\${itemPath.substr(1)}`;
-        }
-    }
-    external_assert_(hasAbsoluteRoot(root), `ensureAbsoluteRoot parameter 'root' must have an absolute root`);
-    // Otherwise ensure root ends with a separator
-    if (root.endsWith('/') || (internal_path_helper_IS_WINDOWS && root.endsWith('\\'))) {
-        // Intentionally empty
-    }
-    else {
-        // Append separator
-        root += external_path_.sep;
-    }
-    return root + itemPath;
-}
-/**
- * On Linux/macOS, true if path starts with `/`. On Windows, true for paths like:
- * `\\hello\share` and `C:\hello` (and using alternate separator).
- */
-function hasAbsoluteRoot(itemPath) {
-    external_assert_(itemPath, `hasAbsoluteRoot parameter 'itemPath' must not be empty`);
-    // Normalize separators
-    itemPath = internal_path_helper_normalizeSeparators(itemPath);
-    // Windows
-    if (internal_path_helper_IS_WINDOWS) {
-        // E.g. \\hello\share or C:\hello
-        return itemPath.startsWith('\\\\') || /^[A-Z]:\\/i.test(itemPath);
-    }
-    // E.g. /hello
-    return itemPath.startsWith('/');
-}
-/**
- * On Linux/macOS, true if path starts with `/`. On Windows, true for paths like:
- * `\`, `\hello`, `\\hello\share`, `C:`, and `C:\hello` (and using alternate separator).
- */
-function hasRoot(itemPath) {
-    external_assert_(itemPath, `isRooted parameter 'itemPath' must not be empty`);
-    // Normalize separators
-    itemPath = internal_path_helper_normalizeSeparators(itemPath);
-    // Windows
-    if (internal_path_helper_IS_WINDOWS) {
-        // E.g. \ or \hello or \\hello
-        // E.g. C: or C:\hello
-        return itemPath.startsWith('\\') || /^[A-Z]:/i.test(itemPath);
-    }
-    // E.g. /hello
-    return itemPath.startsWith('/');
-}
-/**
- * Removes redundant slashes and converts `/` to `\` on Windows
- */
-function internal_path_helper_normalizeSeparators(p) {
-    p = p || '';
-    // Windows
-    if (internal_path_helper_IS_WINDOWS) {
-        // Convert slashes on Windows
-        p = p.replace(/\//g, '\\');
-        // Remove redundant slashes
-        const isUnc = /^\\\\+[^\\]/.test(p); // e.g. \\hello
-        return (isUnc ? '\\' : '') + p.replace(/\\\\+/g, '\\'); // preserve leading \\ for UNC
-    }
-    // Remove redundant slashes
-    return p.replace(/\/\/+/g, '/');
-}
-/**
- * Normalizes the path separators and trims the trailing separator (when safe).
- * For example, `/foo/ => /foo` but `/ => /`
- */
-function safeTrimTrailingSeparator(p) {
-    // Short-circuit if empty
-    if (!p) {
-        return '';
-    }
-    // Normalize separators
-    p = internal_path_helper_normalizeSeparators(p);
-    // No trailing slash
-    if (!p.endsWith(external_path_.sep)) {
-        return p;
-    }
-    // Check '/' on Linux/macOS and '\' on Windows
-    if (p === external_path_.sep) {
-        return p;
-    }
-    // On Windows check if drive root. E.g. C:\
-    if (internal_path_helper_IS_WINDOWS && /^[A-Z]:\\$/i.test(p)) {
-        return p;
-    }
-    // Otherwise trim trailing slash
-    return p.substr(0, p.length - 1);
-}
-//# sourceMappingURL=internal-path-helper.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-match-kind.js
-/**
- * Indicates whether a pattern matches a path
- */
-var MatchKind;
-(function (MatchKind) {
-    /** Not matched */
-    MatchKind[MatchKind["None"] = 0] = "None";
-    /** Matched if the path is a directory */
-    MatchKind[MatchKind["Directory"] = 1] = "Directory";
-    /** Matched if the path is a regular file */
-    MatchKind[MatchKind["File"] = 2] = "File";
-    /** Matched */
-    MatchKind[MatchKind["All"] = 3] = "All";
-})(MatchKind || (MatchKind = {}));
-//# sourceMappingURL=internal-match-kind.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-pattern-helper.js
-
-
-const internal_pattern_helper_IS_WINDOWS = process.platform === 'win32';
-/**
- * Given an array of patterns, returns an array of paths to search.
- * Duplicates and paths under other included paths are filtered out.
- */
-function getSearchPaths(patterns) {
-    // Ignore negate patterns
-    patterns = patterns.filter(x => !x.negate);
-    // Create a map of all search paths
-    const searchPathMap = {};
-    for (const pattern of patterns) {
-        const key = internal_pattern_helper_IS_WINDOWS
-            ? pattern.searchPath.toUpperCase()
-            : pattern.searchPath;
-        searchPathMap[key] = 'candidate';
-    }
-    const result = [];
-    for (const pattern of patterns) {
-        // Check if already included
-        const key = internal_pattern_helper_IS_WINDOWS
-            ? pattern.searchPath.toUpperCase()
-            : pattern.searchPath;
-        if (searchPathMap[key] === 'included') {
-            continue;
-        }
-        // Check for an ancestor search path
-        let foundAncestor = false;
-        let tempKey = key;
-        let parent = dirname(tempKey);
-        while (parent !== tempKey) {
-            if (searchPathMap[parent]) {
-                foundAncestor = true;
-                break;
-            }
-            tempKey = parent;
-            parent = dirname(tempKey);
-        }
-        // Include the search pattern in the result
-        if (!foundAncestor) {
-            result.push(pattern.searchPath);
-            searchPathMap[key] = 'included';
-        }
-    }
-    return result;
-}
-/**
- * Matches the patterns against the path
- */
-function internal_pattern_helper_match(patterns, itemPath) {
-    let result = MatchKind.None;
-    for (const pattern of patterns) {
-        if (pattern.negate) {
-            result &= ~pattern.match(itemPath);
-        }
-        else {
-            result |= pattern.match(itemPath);
-        }
-    }
-    return result;
-}
-/**
- * Checks whether to descend further into the directory
- */
-function internal_pattern_helper_partialMatch(patterns, itemPath) {
-    return patterns.some(x => !x.negate && x.partialMatch(itemPath));
-}
-//# sourceMappingURL=internal-pattern-helper.js.map
-// EXTERNAL MODULE: ./node_modules/@actions/glob/node_modules/minimatch/minimatch.js
-var minimatch = __nccwpck_require__(9526);
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-path.js
-
-
-
-const internal_path_IS_WINDOWS = process.platform === 'win32';
-/**
- * Helper class for parsing paths into segments
- */
-class Path {
-    /**
-     * Constructs a Path
-     * @param itemPath Path or array of segments
-     */
-    constructor(itemPath) {
-        this.segments = [];
-        // String
-        if (typeof itemPath === 'string') {
-            external_assert_(itemPath, `Parameter 'itemPath' must not be empty`);
-            // Normalize slashes and trim unnecessary trailing slash
-            itemPath = safeTrimTrailingSeparator(itemPath);
-            // Not rooted
-            if (!hasRoot(itemPath)) {
-                this.segments = itemPath.split(external_path_.sep);
-            }
-            // Rooted
-            else {
-                // Add all segments, while not at the root
-                let remaining = itemPath;
-                let dir = dirname(remaining);
-                while (dir !== remaining) {
-                    // Add the segment
-                    const basename = external_path_.basename(remaining);
-                    this.segments.unshift(basename);
-                    // Truncate the last segment
-                    remaining = dir;
-                    dir = dirname(remaining);
-                }
-                // Remainder is the root
-                this.segments.unshift(remaining);
-            }
-        }
-        // Array
-        else {
-            // Must not be empty
-            external_assert_(itemPath.length > 0, `Parameter 'itemPath' must not be an empty array`);
-            // Each segment
-            for (let i = 0; i < itemPath.length; i++) {
-                let segment = itemPath[i];
-                // Must not be empty
-                external_assert_(segment, `Parameter 'itemPath' must not contain any empty segments`);
-                // Normalize slashes
-                segment = internal_path_helper_normalizeSeparators(itemPath[i]);
-                // Root segment
-                if (i === 0 && hasRoot(segment)) {
-                    segment = safeTrimTrailingSeparator(segment);
-                    external_assert_(segment === dirname(segment), `Parameter 'itemPath' root segment contains information for multiple segments`);
-                    this.segments.push(segment);
-                }
-                // All other segments
-                else {
-                    // Must not contain slash
-                    external_assert_(!segment.includes(external_path_.sep), `Parameter 'itemPath' contains unexpected path separators`);
-                    this.segments.push(segment);
-                }
-            }
-        }
-    }
-    /**
-     * Converts the path to it's string representation
-     */
-    toString() {
-        // First segment
-        let result = this.segments[0];
-        // All others
-        let skipSlash = result.endsWith(external_path_.sep) || (internal_path_IS_WINDOWS && /^[A-Z]:$/i.test(result));
-        for (let i = 1; i < this.segments.length; i++) {
-            if (skipSlash) {
-                skipSlash = false;
-            }
-            else {
-                result += external_path_.sep;
-            }
-            result += this.segments[i];
-        }
-        return result;
-    }
-}
-//# sourceMappingURL=internal-path.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-pattern.js
-
-
-
-
-
-
-
-const { Minimatch } = minimatch;
-const internal_pattern_IS_WINDOWS = process.platform === 'win32';
-class Pattern {
-    constructor(patternOrNegate, isImplicitPattern = false, segments, homedir) {
-        /**
-         * Indicates whether matches should be excluded from the result set
-         */
-        this.negate = false;
-        // Pattern overload
-        let pattern;
-        if (typeof patternOrNegate === 'string') {
-            pattern = patternOrNegate.trim();
-        }
-        // Segments overload
-        else {
-            // Convert to pattern
-            segments = segments || [];
-            external_assert_(segments.length, `Parameter 'segments' must not empty`);
-            const root = Pattern.getLiteral(segments[0]);
-            external_assert_(root && hasAbsoluteRoot(root), `Parameter 'segments' first element must be a root path`);
-            pattern = new Path(segments).toString().trim();
-            if (patternOrNegate) {
-                pattern = `!${pattern}`;
-            }
-        }
-        // Negate
-        while (pattern.startsWith('!')) {
-            this.negate = !this.negate;
-            pattern = pattern.substr(1).trim();
-        }
-        // Normalize slashes and ensures absolute root
-        pattern = Pattern.fixupPattern(pattern, homedir);
-        // Segments
-        this.segments = new Path(pattern).segments;
-        // Trailing slash indicates the pattern should only match directories, not regular files
-        this.trailingSeparator = internal_path_helper_normalizeSeparators(pattern)
-            .endsWith(external_path_.sep);
-        pattern = safeTrimTrailingSeparator(pattern);
-        // Search path (literal path prior to the first glob segment)
-        let foundGlob = false;
-        const searchSegments = this.segments
-            .map(x => Pattern.getLiteral(x))
-            .filter(x => !foundGlob && !(foundGlob = x === ''));
-        this.searchPath = new Path(searchSegments).toString();
-        // Root RegExp (required when determining partial match)
-        this.rootRegExp = new RegExp(Pattern.regExpEscape(searchSegments[0]), internal_pattern_IS_WINDOWS ? 'i' : '');
-        this.isImplicitPattern = isImplicitPattern;
-        // Create minimatch
-        const minimatchOptions = {
-            dot: true,
-            nobrace: true,
-            nocase: internal_pattern_IS_WINDOWS,
-            nocomment: true,
-            noext: true,
-            nonegate: true
-        };
-        pattern = internal_pattern_IS_WINDOWS ? pattern.replace(/\\/g, '/') : pattern;
-        this.minimatch = new Minimatch(pattern, minimatchOptions);
-    }
-    /**
-     * Matches the pattern against the specified path
-     */
-    match(itemPath) {
-        // Last segment is globstar?
-        if (this.segments[this.segments.length - 1] === '**') {
-            // Normalize slashes
-            itemPath = internal_path_helper_normalizeSeparators(itemPath);
-            // Append a trailing slash. Otherwise Minimatch will not match the directory immediately
-            // preceding the globstar. For example, given the pattern `/foo/**`, Minimatch returns
-            // false for `/foo` but returns true for `/foo/`. Append a trailing slash to handle that quirk.
-            if (!itemPath.endsWith(external_path_.sep) && this.isImplicitPattern === false) {
-                // Note, this is safe because the constructor ensures the pattern has an absolute root.
-                // For example, formats like C: and C:foo on Windows are resolved to an absolute root.
-                itemPath = `${itemPath}${external_path_.sep}`;
-            }
-        }
-        else {
-            // Normalize slashes and trim unnecessary trailing slash
-            itemPath = safeTrimTrailingSeparator(itemPath);
-        }
-        // Match
-        if (this.minimatch.match(itemPath)) {
-            return this.trailingSeparator ? MatchKind.Directory : MatchKind.All;
-        }
-        return MatchKind.None;
-    }
-    /**
-     * Indicates whether the pattern may match descendants of the specified path
-     */
-    partialMatch(itemPath) {
-        // Normalize slashes and trim unnecessary trailing slash
-        itemPath = safeTrimTrailingSeparator(itemPath);
-        // matchOne does not handle root path correctly
-        if (dirname(itemPath) === itemPath) {
-            return this.rootRegExp.test(itemPath);
-        }
-        return this.minimatch.matchOne(itemPath.split(internal_pattern_IS_WINDOWS ? /\\+/ : /\/+/), this.minimatch.set[0], true);
-    }
-    /**
-     * Escapes glob patterns within a path
-     */
-    static globEscape(s) {
-        return (internal_pattern_IS_WINDOWS ? s : s.replace(/\\/g, '\\\\')) // escape '\' on Linux/macOS
-            .replace(/(\[)(?=[^/]+\])/g, '[[]') // escape '[' when ']' follows within the path segment
-            .replace(/\?/g, '[?]') // escape '?'
-            .replace(/\*/g, '[*]'); // escape '*'
-    }
-    /**
-     * Normalizes slashes and ensures absolute root
-     */
-    static fixupPattern(pattern, homedir) {
-        // Empty
-        external_assert_(pattern, 'pattern cannot be empty');
-        // Must not contain `.` segment, unless first segment
-        // Must not contain `..` segment
-        const literalSegments = new Path(pattern).segments.map(x => Pattern.getLiteral(x));
-        external_assert_(literalSegments.every((x, i) => (x !== '.' || i === 0) && x !== '..'), `Invalid pattern '${pattern}'. Relative pathing '.' and '..' is not allowed.`);
-        // Must not contain globs in root, e.g. Windows UNC path \\foo\b*r
-        external_assert_(!hasRoot(pattern) || literalSegments[0], `Invalid pattern '${pattern}'. Root segment must not contain globs.`);
-        // Normalize slashes
-        pattern = internal_path_helper_normalizeSeparators(pattern);
-        // Replace leading `.` segment
-        if (pattern === '.' || pattern.startsWith(`.${external_path_.sep}`)) {
-            pattern = Pattern.globEscape(process.cwd()) + pattern.substr(1);
-        }
-        // Replace leading `~` segment
-        else if (pattern === '~' || pattern.startsWith(`~${external_path_.sep}`)) {
-            homedir = homedir || external_os_.homedir();
-            external_assert_(homedir, 'Unable to determine HOME directory');
-            external_assert_(hasAbsoluteRoot(homedir), `Expected HOME directory to be a rooted path. Actual '${homedir}'`);
-            pattern = Pattern.globEscape(homedir) + pattern.substr(1);
-        }
-        // Replace relative drive root, e.g. pattern is C: or C:foo
-        else if (internal_pattern_IS_WINDOWS &&
-            (pattern.match(/^[A-Z]:$/i) || pattern.match(/^[A-Z]:[^\\]/i))) {
-            let root = ensureAbsoluteRoot('C:\\dummy-root', pattern.substr(0, 2));
-            if (pattern.length > 2 && !root.endsWith('\\')) {
-                root += '\\';
-            }
-            pattern = Pattern.globEscape(root) + pattern.substr(2);
-        }
-        // Replace relative root, e.g. pattern is \ or \foo
-        else if (internal_pattern_IS_WINDOWS && (pattern === '\\' || pattern.match(/^\\[^\\]/))) {
-            let root = ensureAbsoluteRoot('C:\\dummy-root', '\\');
-            if (!root.endsWith('\\')) {
-                root += '\\';
-            }
-            pattern = Pattern.globEscape(root) + pattern.substr(1);
-        }
-        // Otherwise ensure absolute root
-        else {
-            pattern = ensureAbsoluteRoot(Pattern.globEscape(process.cwd()), pattern);
-        }
-        return internal_path_helper_normalizeSeparators(pattern);
-    }
-    /**
-     * Attempts to unescape a pattern segment to create a literal path segment.
-     * Otherwise returns empty string.
-     */
-    static getLiteral(segment) {
-        let literal = '';
-        for (let i = 0; i < segment.length; i++) {
-            const c = segment[i];
-            // Escape
-            if (c === '\\' && !internal_pattern_IS_WINDOWS && i + 1 < segment.length) {
-                literal += segment[++i];
-                continue;
-            }
-            // Wildcard
-            else if (c === '*' || c === '?') {
-                return '';
-            }
-            // Character set
-            else if (c === '[' && i + 1 < segment.length) {
-                let set = '';
-                let closed = -1;
-                for (let i2 = i + 1; i2 < segment.length; i2++) {
-                    const c2 = segment[i2];
-                    // Escape
-                    if (c2 === '\\' && !internal_pattern_IS_WINDOWS && i2 + 1 < segment.length) {
-                        set += segment[++i2];
-                        continue;
-                    }
-                    // Closed
-                    else if (c2 === ']') {
-                        closed = i2;
-                        break;
-                    }
-                    // Otherwise
-                    else {
-                        set += c2;
-                    }
-                }
-                // Closed?
-                if (closed >= 0) {
-                    // Cannot convert
-                    if (set.length > 1) {
-                        return '';
-                    }
-                    // Convert to literal
-                    if (set) {
-                        literal += set;
-                        i = closed;
-                        continue;
-                    }
-                }
-                // Otherwise fall thru
-            }
-            // Append
-            literal += c;
-        }
-        return literal;
-    }
-    /**
-     * Escapes regexp special characters
-     * https://javascript.info/regexp-escaping
-     */
-    static regExpEscape(s) {
-        return s.replace(/[[\\^$.|?*+()]/g, '\\$&');
-    }
-}
-//# sourceMappingURL=internal-pattern.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-search-state.js
-class SearchState {
-    constructor(path, level) {
-        this.path = path;
-        this.level = level;
-    }
-}
-//# sourceMappingURL=internal-search-state.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-globber.js
-var internal_globber_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-var __asyncValues = (undefined && undefined.__asyncValues) || function (o) {
-    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
-    var m = o[Symbol.asyncIterator], i;
-    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
-    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
-    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
-};
-var __await = (undefined && undefined.__await) || function (v) { return this instanceof __await ? (this.v = v, this) : new __await(v); }
-var __asyncGenerator = (undefined && undefined.__asyncGenerator) || function (thisArg, _arguments, generator) {
-    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
-    var g = generator.apply(thisArg, _arguments || []), i, q = [];
-    return i = Object.create((typeof AsyncIterator === "function" ? AsyncIterator : Object).prototype), verb("next"), verb("throw"), verb("return", awaitReturn), i[Symbol.asyncIterator] = function () { return this; }, i;
-    function awaitReturn(f) { return function (v) { return Promise.resolve(v).then(f, reject); }; }
-    function verb(n, f) { if (g[n]) { i[n] = function (v) { return new Promise(function (a, b) { q.push([n, v, a, b]) > 1 || resume(n, v); }); }; if (f) i[n] = f(i[n]); } }
-    function resume(n, v) { try { step(g[n](v)); } catch (e) { settle(q[0][3], e); } }
-    function step(r) { r.value instanceof __await ? Promise.resolve(r.value.v).then(fulfill, reject) : settle(q[0][2], r); }
-    function fulfill(value) { resume("next", value); }
-    function reject(value) { resume("throw", value); }
-    function settle(f, v) { if (f(v), q.shift(), q.length) resume(q[0][0], q[0][1]); }
-};
-
-
-
-
-
-
-
-
-const internal_globber_IS_WINDOWS = process.platform === 'win32';
-class DefaultGlobber {
-    constructor(options) {
-        this.patterns = [];
-        this.searchPaths = [];
-        this.options = getOptions(options);
-    }
-    getSearchPaths() {
-        // Return a copy
-        return this.searchPaths.slice();
-    }
-    glob() {
-        return internal_globber_awaiter(this, void 0, void 0, function* () {
-            var _a, e_1, _b, _c;
-            const result = [];
-            try {
-                for (var _d = true, _e = __asyncValues(this.globGenerator()), _f; _f = yield _e.next(), _a = _f.done, !_a; _d = true) {
-                    _c = _f.value;
-                    _d = false;
-                    const itemPath = _c;
-                    result.push(itemPath);
-                }
-            }
-            catch (e_1_1) { e_1 = { error: e_1_1 }; }
-            finally {
-                try {
-                    if (!_d && !_a && (_b = _e.return)) yield _b.call(_e);
-                }
-                finally { if (e_1) throw e_1.error; }
-            }
-            return result;
-        });
-    }
-    globGenerator() {
-        return __asyncGenerator(this, arguments, function* globGenerator_1() {
-            // Fill in defaults options
-            const options = getOptions(this.options);
-            // Implicit descendants?
-            const patterns = [];
-            for (const pattern of this.patterns) {
-                patterns.push(pattern);
-                if (options.implicitDescendants &&
-                    (pattern.trailingSeparator ||
-                        pattern.segments[pattern.segments.length - 1] !== '**')) {
-                    patterns.push(new Pattern(pattern.negate, true, pattern.segments.concat('**')));
-                }
-            }
-            // Push the search paths
-            const stack = [];
-            for (const searchPath of getSearchPaths(patterns)) {
-                lib_core/* debug */.Yz(`Search path '${searchPath}'`);
-                // Exists?
-                try {
-                    // Intentionally using lstat. Detection for broken symlink
-                    // will be performed later (if following symlinks).
-                    yield __await(external_fs_.promises.lstat(searchPath));
-                }
-                catch (err) {
-                    if (err.code === 'ENOENT') {
-                        continue;
-                    }
-                    throw err;
-                }
-                stack.unshift(new SearchState(searchPath, 1));
-            }
-            // Search
-            const traversalChain = []; // used to detect cycles
-            while (stack.length) {
-                // Pop
-                const item = stack.pop();
-                // Match?
-                const match = internal_pattern_helper_match(patterns, item.path);
-                const partialMatch = !!match || internal_pattern_helper_partialMatch(patterns, item.path);
-                if (!match && !partialMatch) {
-                    continue;
-                }
-                // Stat
-                const stats = yield __await(DefaultGlobber.stat(item, options, traversalChain)
-                // Broken symlink, or symlink cycle detected, or no longer exists
-                );
-                // Broken symlink, or symlink cycle detected, or no longer exists
-                if (!stats) {
-                    continue;
-                }
-                // Hidden file or directory?
-                if (options.excludeHiddenFiles && external_path_.basename(item.path).match(/^\./)) {
-                    continue;
-                }
-                // Directory
-                if (stats.isDirectory()) {
-                    // Matched
-                    if (match & MatchKind.Directory && options.matchDirectories) {
-                        yield yield __await(item.path);
-                    }
-                    // Descend?
-                    else if (!partialMatch) {
-                        continue;
-                    }
-                    // Push the child items in reverse
-                    const childLevel = item.level + 1;
-                    const childItems = (yield __await(external_fs_.promises.readdir(item.path))).map(x => new SearchState(external_path_.join(item.path, x), childLevel));
-                    stack.push(...childItems.reverse());
-                }
-                // File
-                else if (match & MatchKind.File) {
-                    yield yield __await(item.path);
-                }
-            }
-        });
-    }
-    /**
-     * Constructs a DefaultGlobber
-     */
-    static create(patterns, options) {
-        return internal_globber_awaiter(this, void 0, void 0, function* () {
-            const result = new DefaultGlobber(options);
-            if (internal_globber_IS_WINDOWS) {
-                patterns = patterns.replace(/\r\n/g, '\n');
-                patterns = patterns.replace(/\r/g, '\n');
-            }
-            const lines = patterns.split('\n').map(x => x.trim());
-            for (const line of lines) {
-                // Empty or comment
-                if (!line || line.startsWith('#')) {
-                    continue;
-                }
-                // Pattern
-                else {
-                    result.patterns.push(new Pattern(line));
-                }
-            }
-            result.searchPaths.push(...getSearchPaths(result.patterns));
-            return result;
-        });
-    }
-    static stat(item, options, traversalChain) {
-        return internal_globber_awaiter(this, void 0, void 0, function* () {
-            // Note:
-            // `stat` returns info about the target of a symlink (or symlink chain)
-            // `lstat` returns info about a symlink itself
-            let stats;
-            if (options.followSymbolicLinks) {
-                try {
-                    // Use `stat` (following symlinks)
-                    stats = yield external_fs_.promises.stat(item.path);
-                }
-                catch (err) {
-                    if (err.code === 'ENOENT') {
-                        if (options.omitBrokenSymbolicLinks) {
-                            lib_core/* debug */.Yz(`Broken symlink '${item.path}'`);
-                            return undefined;
-                        }
-                        throw new Error(`No information found for the path '${item.path}'. This may indicate a broken symbolic link.`);
-                    }
-                    throw err;
-                }
-            }
-            else {
-                // Use `lstat` (not following symlinks)
-                stats = yield external_fs_.promises.lstat(item.path);
-            }
-            // Note, isDirectory() returns false for the lstat of a symlink
-            if (stats.isDirectory() && options.followSymbolicLinks) {
-                // Get the realpath
-                const realPath = yield external_fs_.promises.realpath(item.path);
-                // Fixup the traversal chain to match the item level
-                while (traversalChain.length >= item.level) {
-                    traversalChain.pop();
-                }
-                // Test for a cycle
-                if (traversalChain.some((x) => x === realPath)) {
-                    lib_core/* debug */.Yz(`Symlink cycle detected for path '${item.path}' and realpath '${realPath}'`);
-                    return undefined;
-                }
-                // Update the traversal chain
-                traversalChain.push(realPath);
-            }
-            return stats;
-        });
-    }
-}
-//# sourceMappingURL=internal-globber.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/internal-hash-files.js
-var internal_hash_files_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-var internal_hash_files_asyncValues = (undefined && undefined.__asyncValues) || function (o) {
-    if (!Symbol.asyncIterator) throw new TypeError("Symbol.asyncIterator is not defined.");
-    var m = o[Symbol.asyncIterator], i;
-    return m ? m.call(o) : (o = typeof __values === "function" ? __values(o) : o[Symbol.iterator](), i = {}, verb("next"), verb("throw"), verb("return"), i[Symbol.asyncIterator] = function () { return this; }, i);
-    function verb(n) { i[n] = o[n] && function (v) { return new Promise(function (resolve, reject) { v = o[n](v), settle(resolve, reject, v.done, v.value); }); }; }
-    function settle(resolve, reject, d, v) { Promise.resolve(v).then(function(v) { resolve({ value: v, done: d }); }, reject); }
-};
-
-
-
-
-
-
-function hashFiles(globber_1, currentWorkspace_1) {
-    return internal_hash_files_awaiter(this, arguments, void 0, function* (globber, currentWorkspace, verbose = false) {
-        var _a, e_1, _b, _c;
-        var _d;
-        const writeDelegate = verbose ? core.info : core.debug;
-        let hasMatch = false;
-        const githubWorkspace = currentWorkspace
-            ? currentWorkspace
-            : ((_d = process.env['GITHUB_WORKSPACE']) !== null && _d !== void 0 ? _d : process.cwd());
-        const result = crypto.createHash('sha256');
-        let count = 0;
-        try {
-            for (var _e = true, _f = internal_hash_files_asyncValues(globber.globGenerator()), _g; _g = yield _f.next(), _a = _g.done, !_a; _e = true) {
-                _c = _g.value;
-                _e = false;
-                const file = _c;
-                writeDelegate(file);
-                if (!file.startsWith(`${githubWorkspace}${path.sep}`)) {
-                    writeDelegate(`Ignore '${file}' since it is not under GITHUB_WORKSPACE.`);
-                    continue;
-                }
-                if (fs.statSync(file).isDirectory()) {
-                    writeDelegate(`Skip directory '${file}'.`);
-                    continue;
-                }
-                const hash = crypto.createHash('sha256');
-                const pipeline = util.promisify(stream.pipeline);
-                yield pipeline(fs.createReadStream(file), hash);
-                result.write(hash.digest());
-                count++;
-                if (!hasMatch) {
-                    hasMatch = true;
-                }
-            }
-        }
-        catch (e_1_1) { e_1 = { error: e_1_1 }; }
-        finally {
-            try {
-                if (!_e && !_a && (_b = _f.return)) yield _b.call(_f);
-            }
-            finally { if (e_1) throw e_1.error; }
-        }
-        result.end();
-        if (hasMatch) {
-            writeDelegate(`Found ${count} files to hash.`);
-            return result.digest('hex');
-        }
-        else {
-            writeDelegate(`No matches found for glob`);
-            return '';
-        }
-    });
-}
-//# sourceMappingURL=internal-hash-files.js.map
-;// CONCATENATED MODULE: ./node_modules/@actions/glob/lib/glob.js
-var glob_awaiter = (undefined && undefined.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
-
-
-/**
- * Constructs a globber
- *
- * @param patterns  Patterns separated by newlines
- * @param options   Glob options
- */
-function create(patterns, options) {
-    return glob_awaiter(this, void 0, void 0, function* () {
-        return yield DefaultGlobber.create(patterns, options);
-    });
-}
-/**
- * Computes the sha256 hash of a glob
- *
- * @param patterns  Patterns separated by newlines
- * @param currentWorkspace  Workspace used when matching files
- * @param options   Glob options
- * @param verbose   Enables verbose logging
- */
-function glob_hashFiles(patterns_1) {
-    return glob_awaiter(this, arguments, void 0, function* (patterns, currentWorkspace = '', options, verbose = false) {
-        let followSymbolicLinks = true;
-        if (options && typeof options.followSymbolicLinks === 'boolean') {
-            followSymbolicLinks = options.followSymbolicLinks;
-        }
-        const globber = yield create(patterns, { followSymbolicLinks });
-        return _hashFiles(globber, currentWorkspace, verbose);
-    });
-}
-//# sourceMappingURL=glob.js.map
-;// CONCATENATED MODULE: ./src/bundler.ts
-
-
-
-
-
-/**
- * Resolve a local bundle path (may contain glob patterns) to a single file.
- * Errors if zero or multiple files match.
- */
-async function resolveLocalBundle(pattern, workspaceDir) {
-    const resolvedWorkspace = external_path_.resolve(workspaceDir);
-    // If the pattern is an absolute path without globs, use it directly
-    const resolvedPattern = external_path_.isAbsolute(pattern) ? pattern : external_path_.join(resolvedWorkspace, pattern);
-    const globber = await create(resolvedPattern, { followSymbolicLinks: false });
-    const matches = await globber.glob();
-    if (matches.length === 0) {
-        throw new Error(`No bundle found matching: ${pattern}`);
-    }
-    if (matches.length > 1) {
-        const list = matches.map(m => external_path_.relative(resolvedWorkspace, m)).join(', ');
-        throw new Error(`Multiple bundles match '${pattern}': ${list}. Use an exact path.`);
-    }
-    const resolvedBundle = external_path_.resolve(matches[0]);
-    // Path traversal protection for relative patterns: ensure resolved path stays
-    // within the workspace. Absolute patterns are user-explicit and not checked —
-    // the user intentionally specified a location (e.g. /tmp/gh-aw/apm-bundle/).
-    if (!external_path_.isAbsolute(pattern)) {
-        const relative = external_path_.relative(resolvedWorkspace, resolvedBundle);
-        if (relative.startsWith('..') || external_path_.isAbsolute(relative)) {
-            throw new Error(`Bundle path "${pattern}" resolves outside the workspace`);
-        }
-    }
-    return resolvedBundle;
-}
-/**
- * Extract a bundle into the output directory.
- * Prefers `apm unpack` (with verification) if APM is available,
- * falls back to `tar xzf` otherwise.
- */
-async function extractBundle(bundlePath, outputDir) {
-    const resolvedBundle = external_path_.resolve(bundlePath);
-    const resolvedOutput = external_path_.resolve(outputDir);
-    if (!external_fs_.existsSync(resolvedBundle)) {
-        throw new Error(`Bundle not found: ${bundlePath}`);
-    }
-    // Try apm unpack first (provides verification)
-    const apmAvailable = await lib_exec/* exec */.m('apm', ['--version'], {
-        ignoreReturnCode: true,
-        silent: true,
-    }).catch(() => 1) === 0;
-    if (apmAvailable) {
-        lib_core/* info */.pq('Using apm unpack (with verification)...');
-        const rc = await lib_exec/* exec */.m('apm', ['unpack', resolvedBundle, '-o', resolvedOutput], {
-            ignoreReturnCode: true,
-        });
-        if (rc !== 0) {
-            throw new Error(`apm unpack failed with exit code ${rc}`);
-        }
-        const files = countDeployedFiles(resolvedOutput);
-        return { files, verified: true };
-    }
-    // Fallback: tar extraction.
-    //
-    // Defense-in-depth: even if this path ever runs again (e.g. if a future
-    // change reintroduces a "skip apm install" mode, or apm install transiently
-    // fails), exclude the lockfile + manifest. They are bundle metadata, not
-    // deployable output — the same files that `apm unpack` (the primary path)
-    // intentionally never copies. Leaking them into a git checkout dirties the
-    // workspace and breaks downstream `git checkout` steps. See microsoft/apm-action#26.
-    lib_core/* info */.pq('APM not available — extracting with tar (no verification)...');
-    const rc = await lib_exec/* exec */.m('tar', [
-        'xzf', resolvedBundle,
-        '-C', resolvedOutput,
-        '--strip-components=1',
-        '--exclude=apm.lock.yaml',
-        '--exclude=apm.lock',
-        '--exclude=apm.yml',
-    ], {
-        ignoreReturnCode: true,
-    });
-    if (rc !== 0) {
-        throw new Error(`tar extraction failed with exit code ${rc}`);
-    }
-    const files = countDeployedFiles(resolvedOutput);
-    return { files, verified: false };
-}
-/**
- * Run `apm pack` after install and return the path to the produced bundle.
- */
-async function runPackStep(workingDir, opts) {
-    const resolvedDir = external_path_.resolve(workingDir);
-    const buildDir = external_path_.join(resolvedDir, 'build');
-    const args = ['pack', '-o', buildDir];
-    if (opts.target) {
-        args.push('--target', opts.target);
-    }
-    if (opts.archive) {
-        args.push('--archive');
-    }
-    lib_core/* info */.pq(`Running: apm ${args.join(' ')}`);
-    const rc = await lib_exec/* exec */.m('apm', args, {
-        cwd: resolvedDir,
-        ignoreReturnCode: true,
-        env: { ...process.env },
-    });
-    if (rc !== 0) {
-        throw new Error(`apm pack failed with exit code ${rc}`);
-    }
-    // Find the produced bundle in build/
-    const bundlePath = findBundle(buildDir, opts.archive);
-    lib_core/* info */.pq(`Bundle produced: ${bundlePath}`);
-    return bundlePath;
-}
-/**
- * Find the bundle output in the build directory.
- * For archives: look for .tar.gz files.
- * For directories: look for non-hidden directories.
- */
-function findBundle(buildDir, archive) {
-    if (!external_fs_.existsSync(buildDir)) {
-        throw new Error(`Build directory not found: ${buildDir}`);
-    }
-    const entries = external_fs_.readdirSync(buildDir);
-    if (archive) {
-        const archives = entries.filter(e => e.endsWith('.tar.gz')).sort();
-        if (archives.length === 0) {
-            throw new Error('No .tar.gz archive found in build directory after apm pack');
-        }
-        if (archives.length > 1) {
-            throw new Error(`Multiple .tar.gz archives found in build directory after apm pack: ${archives.join(', ')}`);
-        }
-        return external_path_.join(buildDir, archives[0]);
-    }
-    // Directory mode: find the first non-hidden directory
-    const dirs = entries.filter(e => {
-        if (e.startsWith('.'))
-            return false;
-        return external_fs_.statSync(external_path_.join(buildDir, e)).isDirectory();
-    }).sort();
-    if (dirs.length === 0) {
-        throw new Error('No bundle directory found in build directory after apm pack');
-    }
-    if (dirs.length > 1) {
-        throw new Error(`Multiple bundle directories found in build directory after apm pack: ${dirs.join(', ')}`);
-    }
-    return external_path_.join(buildDir, dirs[0]);
-}
-/**
- * Count deployed primitive files under .github/ for reporting.
- */
-function countDeployedFiles(rootDir) {
-    const githubDir = external_path_.join(rootDir, '.github');
-    const claudeDir = external_path_.join(rootDir, '.claude');
-    let count = 0;
-    for (const dir of [githubDir, claudeDir]) {
-        if (external_fs_.existsSync(dir)) {
-            count += countFilesRecursive(dir);
-        }
-    }
-    return count;
-}
-function countFilesRecursive(dir) {
-    let count = 0;
-    for (const entry of external_fs_.readdirSync(dir, { withFileTypes: true })) {
-        if (entry.name.startsWith('.'))
-            continue;
-        const fullPath = external_path_.join(dir, entry.name);
-        if (entry.isDirectory()) {
-            count += countFilesRecursive(fullPath);
-        }
-        else {
-            count++;
-        }
-    }
-    return count;
-}
-
+// EXTERNAL MODULE: ./src/bundler.ts + 10 modules
+var bundler = __nccwpck_require__(2744);
 ;// CONCATENATED MODULE: ./src/runner.ts
 
 
@@ -41469,6 +41598,22 @@ function countFilesRecursive(dir) {
 
 
 
+/**
+ * Allowed values for the `bundle-format` input.
+ */
+const VALID_BUNDLE_FORMATS = ['apm', 'plugin'];
+/**
+ * Resolve and validate the `bundle-format` input. Defaults to 'apm' (this
+ * action's default; INTENTIONALLY not the apm CLI's default, to keep
+ * existing pack/restore round-trips working). Throws on unknown values.
+ */
+function resolveBundleFormat() {
+    const raw = (lib_core/* getInput */.V4('bundle-format') || 'apm').trim().toLowerCase();
+    if (!VALID_BUNDLE_FORMATS.includes(raw)) {
+        throw new Error(`bundle-format must be one of: ${VALID_BUNDLE_FORMATS.join(', ')} (got: '${raw}')`);
+    }
+    return raw;
+}
 /**
  * Run the APM action: install agent primitives.
  *
@@ -41491,7 +41636,7 @@ async function run() {
         const isolated = lib_core/* getInput */.V4('isolated') === 'true';
         const auditReportInput = lib_core/* getInput */.V4('audit-report').trim();
         // Pass github-token input to APM subprocess as GITHUB_TOKEN.
-        // GitHub Actions does not auto-export input values as env vars —
+        // GitHub Actions does not auto-export input values as env vars --
         // without this, APM runs unauthenticated (rate-limited, no private repo access).
         // Use ??= so a GITHUB_TOKEN already in the environment (e.g., a PAT set via
         // job-level `env:`) is not clobbered by the action's default github.token.
@@ -41514,6 +41659,64 @@ async function run() {
             if (!callerProvidedToken) {
                 process.env.GITHUB_APM_PAT ??= githubToken;
             }
+        }
+        // SETUP-ONLY MODE: install the APM CLI onto PATH and exit.
+        // Skips apm install, all project-level operations, and the
+        // working-directory existence check. Designed for callers who want
+        // to run their own apm commands in subsequent steps (the setup-node
+        // pattern, see microsoft/apm-action#24).
+        const setupOnly = lib_core/* getInput */.V4('setup-only') === 'true';
+        if (setupOnly) {
+            // 4-way mutex: setup-only, pack, bundle, bundles-file are exclusive.
+            // We also reject every other input that implies project-level work,
+            // because allowing them silently is the kind of trap that turns a
+            // misconfigured workflow into a 20-minute debugging session.
+            const conflicts = [];
+            if (packInput)
+                conflicts.push('pack');
+            if (bundleInput)
+                conflicts.push('bundle');
+            if (bundlesFileInput)
+                conflicts.push('bundles-file');
+            if (isolated)
+                conflicts.push('isolated');
+            if (lib_core/* getInput */.V4('compile') === 'true')
+                conflicts.push('compile');
+            if (lib_core/* getInput */.V4('script').trim())
+                conflicts.push('script');
+            if (lib_core/* getInput */.V4('dependencies').trim())
+                conflicts.push('dependencies');
+            if (auditReportInput)
+                conflicts.push('audit-report');
+            if (lib_core/* getInput */.V4('target').trim())
+                conflicts.push('target');
+            if (lib_core/* getInput */.V4('archive').trim() && lib_core/* getInput */.V4('archive') !== 'true') {
+                conflicts.push('archive');
+            }
+            if (lib_core/* getInput */.V4('bundle-format').trim())
+                conflicts.push('bundle-format');
+            if (conflicts.length > 0) {
+                throw new Error(`'setup-only' is mutually exclusive with: ${conflicts.join(', ')}. `
+                    + `setup-only installs the APM CLI onto PATH and exits; remove the `
+                    + `conflicting input(s) or set setup-only: false.`);
+            }
+            // working-directory in setup-only is harmless but suspicious if the
+            // user explicitly set a non-default value -- they probably meant to
+            // do project-level work. Warn (not error) so it surfaces in
+            // annotations without breaking workflows.
+            const wd = lib_core/* getInput */.V4('working-directory');
+            if (wd && wd !== '.') {
+                lib_core/* warning */.$e(`working-directory='${wd}' is ignored in setup-only mode. `
+                    + `Remove the input or unset setup-only.`);
+            }
+            const result = await ensureApmInstalled();
+            lib_core/* setOutput */.uH('apm-version', result.resolvedVersion);
+            if (result.binaryPath) {
+                lib_core/* setOutput */.uH('apm-path', result.binaryPath);
+            }
+            lib_core/* setOutput */.uH('success', 'true');
+            lib_core/* info */.pq(`APM ${result.resolvedVersion} installed (setup-only mode)`);
+            return;
         }
         // 3-way mutex: at most one of pack / bundle / bundles-file.
         const modeFlags = [
@@ -41575,19 +41778,20 @@ async function run() {
         // agent job, and we get bundle integrity verification for free.
         if (bundleInput) {
             await ensureApmInstalled();
-            const bundlePath = await resolveLocalBundle(bundleInput, resolvedDir);
+            const bundlePath = await (0,bundler/* resolveLocalBundle */.UG)(bundleInput, resolvedDir);
             lib_core/* info */.pq(`Restoring bundle: ${bundlePath}`);
-            const result = await extractBundle(bundlePath, resolvedDir);
+            const result = await (0,bundler/* extractBundle */.yB)(bundlePath, resolvedDir);
             // Restore mode now installs APM up-front, so the verified `apm unpack`
             // path is the expected outcome. The unverified branch only runs if APM
             // install failed transiently and extractBundle fell through to its tar
-            // fallback — point operators at the install logs, not at re-installing.
+            // fallback -- point operators at the install logs, not at re-installing.
             const verifiedMsg = result.verified
                 ? ' (verified)'
-                : ' (unverified — APM install did not complete; see earlier install logs)';
+                : ' (unverified -- APM install did not complete; see earlier install logs)';
             lib_core/* info */.pq(`Restored ${result.files} file(s)${verifiedMsg}`);
             const primitivesPath = external_path_.join(resolvedDir, '.github');
             lib_core/* setOutput */.uH('primitives-path', primitivesPath);
+            lib_core/* setOutput */.uH('bundle-format', result.format);
             // Run audit on unpacked bundle if report requested
             if (auditReportPath) {
                 await runAuditReport(resolvedDir, auditReportPath);
@@ -41627,6 +41831,9 @@ async function run() {
             const primitivesPath = external_path_.join(resolvedDir, '.github');
             lib_core/* setOutput */.uH('primitives-path', primitivesPath);
             lib_core/* setOutput */.uH('bundles-restored', String(result.count));
+            // Multi-bundle restore is APM-format only (plugin bundles are rejected
+            // upstream in restoreMultiBundles), so this output is always 'apm' here.
+            lib_core/* setOutput */.uH('bundle-format', 'apm');
             // Run audit on merged workspace if requested
             if (auditReportPath) {
                 await runAuditReport(resolvedDir, auditReportPath);
@@ -41688,8 +41895,23 @@ async function run() {
         if (packInput) {
             const target = lib_core/* getInput */.V4('target').trim() || undefined;
             const archive = lib_core/* getInput */.V4('archive') !== 'false';
-            const bundlePath = await runPackStep(resolvedDir, { target, archive });
-            lib_core/* setOutput */.uH('bundle-path', bundlePath);
+            const bundleFormat = resolveBundleFormat();
+            const packResult = await (0,bundler/* runPackStep */.D5)(resolvedDir, {
+                target,
+                archive,
+                format: bundleFormat,
+            });
+            lib_core/* setOutput */.uH('bundle-path', packResult.bundlePath);
+            lib_core/* setOutput */.uH('bundle-format', packResult.format);
+        }
+        else {
+            // bundle-format only makes sense with pack: true. Surface the misuse
+            // explicitly rather than silently ignoring the input.
+            const fmtRaw = lib_core/* getInput */.V4('bundle-format').trim();
+            if (fmtRaw) {
+                throw new Error(`bundle-format='${fmtRaw}' was set but pack is not enabled. `
+                    + `Set pack: true to produce a bundle, or remove bundle-format.`);
+            }
         }
         lib_core/* setOutput */.uH('success', 'true');
         lib_core/* info */.pq('APM action completed successfully');

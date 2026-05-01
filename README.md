@@ -32,6 +32,39 @@ This installs the APM CLI, reads your `apm.yml`, and runs `apm install`.
       - microsoft/apm-sample-package
 ```
 
+### Setup-only mode (install CLI, then exit)
+
+Just install the APM CLI and put it on `PATH`, like `actions/setup-node`. Run any `apm` command yourself in subsequent steps. No `apm.yml` required, no install step runs.
+
+```yaml
+- uses: microsoft/apm-action@v1
+  id: apm
+  with:
+    setup-only: 'true'
+    apm-version: '0.11.0'
+
+- run: apm --version
+- run: apm pack -o build --format plugin
+```
+
+`setup-only: true` is mutually exclusive with `pack`, `bundle`, and `bundles-file`. The action will not read `apm.yml`, run `apm install`, or deploy primitives. Sets the `apm-version` and `apm-path` outputs so downstream steps can branch on the resolved CLI.
+
+### Bundle format (`apm` vs `plugin`)
+
+`apm pack` supports two layouts:
+
+- `bundle-format: apm` (default) -- produces an APM bundle containing `apm.lock.yaml` and a `.github/` (or `.claude/`) tree. Restorable by this action via `bundle:` / `bundles-file:`. **Use this when the consumer is another `microsoft/apm-action` step.**
+- `bundle-format: plugin` -- produces a Claude Code plugin bundle with `plugin.json` at the root and flat primitive directories (`agents/`, `skills/`, ...). **Use this when publishing to a Claude Code marketplace.** Plugin bundles are not restorable by this action; restore them with your plugin tooling.
+
+```yaml
+- uses: microsoft/apm-action@v1
+  with:
+    pack: 'true'
+    bundle-format: 'plugin'    # opt-in; default is 'apm'
+```
+
+The `bundle-format` output reflects the format of the produced or restored bundle.
+
 ### Pack mode (produce a bundle)
 
 Install dependencies, scan for hidden Unicode threats, and pack into a self-contained `.tar.gz` archive. Add `audit-report` to generate a SARIF report alongside the bundle:
@@ -208,6 +241,8 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | `isolated` | No | `false` | Ignore apm.yml and clear pre-existing primitive dirs — install only inline dependencies |
 | `compile` | No | `false` | Run `apm compile` after install to generate AGENTS.md |
 | `pack` | No | `false` | Pack a bundle after install (produces `.tar.gz` by default) |
+| `bundle-format` | No | `apm` | Bundle layout when `pack: true`. `apm` produces an APM bundle (with `apm.lock.yaml` and a `.github/` tree, restorable by this action). `plugin` produces a Claude Code plugin bundle (with `plugin.json` at the root, intended for marketplace consumption). |
+| `setup-only` | No | `false` | Install the APM CLI and exit. No `apm.yml` is read, no `apm install` runs, no primitives are deployed. Mutually exclusive with `pack`, `bundle`, and `bundles-file`. |
 | `bundle` | No | | Restore from a bundle (local path or glob). Installs APM and unpacks via `apm unpack` (verified). |
 | `bundles-file` | No | | Path to a UTF-8 text file with one bundle path per line. Restores N bundles into a single workspace in caller-specified order (last wins on collisions). Mutually exclusive with `pack` and `bundle`. |
 | `target` | No | | Bundle target: `copilot`, `vscode`, `claude`, or `all` (used with `pack: true`) |
@@ -219,6 +254,9 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | Output | Description |
 |---|---|
 | `success` | Whether the action succeeded (`true`/`false`) |
+| `apm-version` | Resolved APM CLI version (e.g. `0.11.0`). Always set. |
+| `apm-path` | Absolute path to the resolved `apm` binary. Set when the action installs APM into the tool cache; empty when reusing a CLI already on `PATH`. |
+| `bundle-format` | Format of the produced or restored bundle (`apm` or `plugin`). Set in pack and single-bundle restore modes. |
 | `primitives-path` | Path where agent primitives were deployed (`.github`) |
 | `bundle-path` | Path to the packed bundle (only set in pack mode) |
 | `audit-report-path` | Path to the generated SARIF audit report (if `audit-report` was set) |

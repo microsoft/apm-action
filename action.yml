@@ -31,9 +31,21 @@ inputs:
     required: false
     default: 'false'
   pack:
-    description: 'Pack an APM bundle after install (produces .tar.gz by default)'
+    description: 'Pack a bundle after install. Format is controlled by `bundle-format` (default: apm). Produces .tar.gz by default.'
     required: false
     default: 'false'
+  bundle-format:
+    description: |
+      Format for `pack: true`. One of:
+        - apm     (default)  Classic APM bundle: apm.lock.yaml + .github/.claude trees.
+                             Round-trips through this action's restore mode.
+        - plugin             Claude Code marketplace layout: plugin.json + flat
+                             agents/, skills/, commands/, instructions/ dirs.
+                             NOTE: plugin-format restore is NOT supported by this
+                             action yet -- consume plugin bundles with your plugin
+                             tooling, or re-pack with bundle-format: apm.
+    required: false
+    default: ''
   bundle:
     description: 'Restore from a bundle (local path or glob pattern). Skips APM installation entirely.'
     required: false
@@ -65,6 +77,10 @@ inputs:
     description: 'Generate a SARIF audit report during install/unpack. Set to "true" for default path (apm-audit.sarif), or provide a custom file path.'
     required: false
     default: ''
+  setup-only:
+    description: 'Install the APM CLI onto PATH and exit. Skips apm install and all project-level operations. Use subsequent steps to run apm commands directly. Mutually exclusive with pack, bundle, bundles-file, isolated, compile, script, dependencies, audit-report, target, archive, bundle-format.'
+    required: false
+    default: 'false'
 
 outputs:
   success:
@@ -73,10 +89,16 @@ outputs:
     description: 'Path where agent primitives were deployed (.github)'
   bundle-path:
     description: 'Path to the packed bundle (only set in pack mode)'
+  bundle-format:
+    description: 'Format of the produced or restored bundle: "apm" or "plugin". Set in pack mode and single-bundle restore mode.'
   audit-report-path:
     description: 'Path to the generated SARIF audit report, if audit-report was enabled'
   bundles-restored:
     description: 'Number of bundles successfully restored (multi-bundle mode only).'
+  apm-version:
+    description: 'Resolved APM CLI version string (e.g. "0.11.0"). Set in setup-only mode.'
+  apm-path:
+    description: 'Full path to the apm executable that was installed. Set in setup-only mode (empty when reusing a pre-existing apm on PATH).'
 
 runs:
   using: 'node24'
