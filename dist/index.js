@@ -32741,8 +32741,7 @@ async function extractBundle(bundlePath, outputDir) {
             + `The bundle at ${external_path_.basename(bundlePath)} was packed with --format plugin `
             + `(no apm.lock.yaml, flat plugin layout). Either:\n`
             + `  - Re-pack the bundle with bundle-format: apm (or 'apm pack --format apm'), or\n`
-            + `  - Restore the plugin bundle yourself using your plugin tooling.\n`
-            + `Tracking: plugin-bundle restore is planned via 'apm unpack' upstream.`);
+            + `  - Restore the plugin bundle yourself using your plugin tooling (e.g. Claude Code plugin install).`);
     }
     // APM-format path: prefer `apm unpack` (provides verification),
     // fall back to `tar xzf` if APM is unavailable.
@@ -41557,7 +41556,19 @@ async function ensureApmInstalled() {
         const pathVersion = await probePathVersion();
         if (pathVersion) {
             lib_core/* info */.pq(`APM ${pathVersion} already available on PATH (apm-version: latest)`);
-            return { resolvedVersion: pathVersion, toolDir: '', binaryPath: '' };
+            // Resolve the actual binary path so apm-path output is meaningful even
+            // when reusing a pre-existing apm. Falls back to empty string if `which`
+            // fails -- not a hard error since the binary is demonstrably callable.
+            let binaryPath = '';
+            try {
+                const which = await lib_exec/* getExecOutput */.H('which', ['apm'], { silent: true });
+                if (which.exitCode === 0)
+                    binaryPath = which.stdout.trim();
+            }
+            catch {
+                // ignore
+            }
+            return { resolvedVersion: pathVersion, toolDir: '', binaryPath };
         }
     }
     lib_core/* info */.pq(`Installing APM (version: ${apmVersionInput})...`);
@@ -41690,9 +41701,10 @@ async function run() {
                 conflicts.push('audit-report');
             if (lib_core/* getInput */.V4('target').trim())
                 conflicts.push('target');
-            if (lib_core/* getInput */.V4('archive').trim() && lib_core/* getInput */.V4('archive') !== 'true') {
-                conflicts.push('archive');
-            }
+            // archive is intentionally NOT in this list: it is a sub-option of
+            // pack mode (toggling tar.gz vs directory output). Rejecting `pack`
+            // already covers it; flagging archive separately surprises users
+            // whose composite-action templates emit `archive: 'true'` by default.
             if (lib_core/* getInput */.V4('bundle-format').trim())
                 conflicts.push('bundle-format');
             if (conflicts.length > 0) {
@@ -41711,9 +41723,7 @@ async function run() {
             }
             const result = await ensureApmInstalled();
             lib_core/* setOutput */.uH('apm-version', result.resolvedVersion);
-            if (result.binaryPath) {
-                lib_core/* setOutput */.uH('apm-path', result.binaryPath);
-            }
+            lib_core/* setOutput */.uH('apm-path', result.binaryPath);
             lib_core/* setOutput */.uH('success', 'true');
             lib_core/* info */.pq(`APM ${result.resolvedVersion} installed (setup-only mode)`);
             return;
@@ -41777,7 +41787,9 @@ async function run() {
         // single small download per runner — negligible vs. the cost of a typical
         // agent job, and we get bundle integrity verification for free.
         if (bundleInput) {
-            await ensureApmInstalled();
+            const installResult = await ensureApmInstalled();
+            lib_core/* setOutput */.uH('apm-version', installResult.resolvedVersion);
+            lib_core/* setOutput */.uH('apm-path', installResult.binaryPath);
             const bundlePath = await (0,bundler/* resolveLocalBundle */.UG)(bundleInput, resolvedDir);
             lib_core/* info */.pq(`Restoring bundle: ${bundlePath}`);
             const result = await (0,bundler/* extractBundle */.yB)(bundlePath, resolvedDir);
@@ -41825,7 +41837,9 @@ async function run() {
             // additionally probes `apm --version` as a defence-in-depth check so
             // a transient install failure surfaces with a clear error before the
             // first unpack rather than as a generic ENOENT mid-loop.
-            await ensureApmInstalled();
+            const installResult = await ensureApmInstalled();
+            lib_core/* setOutput */.uH('apm-version', installResult.resolvedVersion);
+            lib_core/* setOutput */.uH('apm-path', installResult.binaryPath);
             const result = await restoreMultiBundles(bundles, resolvedDir);
             lib_core/* info */.pq(`Restored ${result.count} bundle(s) successfully into ${resolvedDir}`);
             const primitivesPath = external_path_.join(resolvedDir, '.github');
@@ -41843,7 +41857,9 @@ async function run() {
             return;
         }
         // 1. Install APM CLI (install + pack modes)
-        await ensureApmInstalled();
+        const installResult = await ensureApmInstalled();
+        lib_core/* setOutput */.uH('apm-version', installResult.resolvedVersion);
+        lib_core/* setOutput */.uH('apm-path', installResult.binaryPath);
         // 2. Parse inputs
         const depsInput = lib_core/* getInput */.V4('dependencies').trim();
         // 3. Handle isolated mode: clear existing primitives, generate apm.yml from inline deps only.

@@ -235,13 +235,32 @@ describe('ensureApmInstalled', () => {
       if (name === 'github-token') return 'ghp_mock';
       return '';
     }) as unknown as () => void);
-    mockGetExecOutput.mockResolvedValue({ exitCode: 0, stdout: 'apm 0.11.0\n', stderr: '' });
+    // First call: probe `apm --version`. Second call: `which apm` to resolve binary path.
+    mockGetExecOutput
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'apm 0.11.0\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '/usr/local/bin/apm\n', stderr: '' });
 
     const result = await ensureApmInstalled();
 
     expect(mockDownloadTool).not.toHaveBeenCalled();
     expect(result.resolvedVersion).toBe('0.11.0');
     expect(result.toolDir).toBe('');
+    expect(result.binaryPath).toBe('/usr/local/bin/apm');
+  });
+
+  it('latest reuses apm on PATH and tolerates failed which probe (binaryPath empty)', async () => {
+    mockGetInput.mockImplementation(((name: string) => {
+      if (name === 'apm-version') return 'latest';
+      if (name === 'github-token') return 'ghp_mock';
+      return '';
+    }) as unknown as () => void);
+    mockGetExecOutput
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'apm 0.11.0\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'which: command not found' });
+
+    const result = await ensureApmInstalled();
+
+    expect(result.resolvedVersion).toBe('0.11.0');
     expect(result.binaryPath).toBe('');
   });
 

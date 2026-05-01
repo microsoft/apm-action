@@ -119,7 +119,17 @@ export async function ensureApmInstalled(): Promise<InstallResult> {
     const pathVersion = await probePathVersion();
     if (pathVersion) {
       core.info(`APM ${pathVersion} already available on PATH (apm-version: latest)`);
-      return { resolvedVersion: pathVersion, toolDir: '', binaryPath: '' };
+      // Resolve the actual binary path so apm-path output is meaningful even
+      // when reusing a pre-existing apm. Falls back to empty string if `which`
+      // fails -- not a hard error since the binary is demonstrably callable.
+      let binaryPath = '';
+      try {
+        const which = await exec.getExecOutput('which', ['apm'], { silent: true });
+        if (which.exitCode === 0) binaryPath = which.stdout.trim();
+      } catch {
+        // ignore
+      }
+      return { resolvedVersion: pathVersion, toolDir: '', binaryPath };
     }
   }
 

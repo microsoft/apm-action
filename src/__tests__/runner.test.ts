@@ -897,7 +897,7 @@ describe('setup-only mode', () => {
     expect(apmProjectCalls).toHaveLength(0);
   });
 
-  it('does not set apm-path when reusing a pre-existing PATH apm (binaryPath empty)', async () => {
+  it('always sets apm-path output even when binaryPath is empty (PATH-reuse)', async () => {
     mockEnsureApmInstalled.mockResolvedValue({
       resolvedVersion: '0.11.0',
       toolDir: '',
@@ -907,8 +907,7 @@ describe('setup-only mode', () => {
     await run();
 
     expect(mockSetOutput).toHaveBeenCalledWith('apm-version', '0.11.0');
-    const apmPathCall = mockSetOutput.mock.calls.find(c => c[0] === 'apm-path');
-    expect(apmPathCall).toBeUndefined();
+    expect(mockSetOutput).toHaveBeenCalledWith('apm-path', '');
   });
 
   it('rejects setup-only + pack with consolidated error', async () => {

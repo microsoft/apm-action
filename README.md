@@ -255,7 +255,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 |---|---|
 | `success` | Whether the action succeeded (`true`/`false`) |
 | `apm-version` | Resolved APM CLI version (e.g. `0.11.0`). Always set. |
-| `apm-path` | Absolute path to the resolved `apm` binary. Set when the action installs APM into the tool cache; empty when reusing a CLI already on `PATH`. |
+| `apm-path` | Absolute path to the resolved `apm` binary. Resolved via tool-cache when the action installed APM, or via `which apm` when reusing a pre-existing CLI on `PATH`. |
 | `bundle-format` | Format of the produced or restored bundle (`apm` or `plugin`). Set in pack and single-bundle restore modes. |
 | `primitives-path` | Path where agent primitives were deployed (`.github`) |
 | `bundle-path` | Path to the packed bundle (only set in pack mode) |

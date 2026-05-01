@@ -95,9 +95,10 @@ export async function run(): Promise<void> {
       if (core.getInput('dependencies').trim()) conflicts.push('dependencies');
       if (auditReportInput) conflicts.push('audit-report');
       if (core.getInput('target').trim()) conflicts.push('target');
-      if (core.getInput('archive').trim() && core.getInput('archive') !== 'true') {
-        conflicts.push('archive');
-      }
+      // archive is intentionally NOT in this list: it is a sub-option of
+      // pack mode (toggling tar.gz vs directory output). Rejecting `pack`
+      // already covers it; flagging archive separately surprises users
+      // whose composite-action templates emit `archive: 'true'` by default.
       if (core.getInput('bundle-format').trim()) conflicts.push('bundle-format');
       if (conflicts.length > 0) {
         throw new Error(
@@ -121,9 +122,7 @@ export async function run(): Promise<void> {
 
       const result = await ensureApmInstalled();
       core.setOutput('apm-version', result.resolvedVersion);
-      if (result.binaryPath) {
-        core.setOutput('apm-path', result.binaryPath);
-      }
+      core.setOutput('apm-path', result.binaryPath);
       core.setOutput('success', 'true');
       core.info(`APM ${result.resolvedVersion} installed (setup-only mode)`);
       return;
@@ -193,7 +192,9 @@ export async function run(): Promise<void> {
     // single small download per runner — negligible vs. the cost of a typical
     // agent job, and we get bundle integrity verification for free.
     if (bundleInput) {
-      await ensureApmInstalled();
+      const installResult = await ensureApmInstalled();
+      core.setOutput('apm-version', installResult.resolvedVersion);
+      core.setOutput('apm-path', installResult.binaryPath);
 
       const bundlePath = await resolveLocalBundle(bundleInput, resolvedDir);
       core.info(`Restoring bundle: ${bundlePath}`);
@@ -258,7 +259,9 @@ export async function run(): Promise<void> {
       // additionally probes `apm --version` as a defence-in-depth check so
       // a transient install failure surfaces with a clear error before the
       // first unpack rather than as a generic ENOENT mid-loop.
-      await ensureApmInstalled();
+      const installResult = await ensureApmInstalled();
+      core.setOutput('apm-version', installResult.resolvedVersion);
+      core.setOutput('apm-path', installResult.binaryPath);
       const result = await restoreMultiBundles(bundles, resolvedDir);
 
       core.info(
@@ -283,7 +286,9 @@ export async function run(): Promise<void> {
     }
 
     // 1. Install APM CLI (install + pack modes)
-    await ensureApmInstalled();
+    const installResult = await ensureApmInstalled();
+    core.setOutput('apm-version', installResult.resolvedVersion);
+    core.setOutput('apm-path', installResult.binaryPath);
 
     // 2. Parse inputs
     const depsInput = core.getInput('dependencies').trim();

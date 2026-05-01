@@ -116,8 +116,7 @@ export async function extractBundle(bundlePath: string, outputDir: string): Prom
       + `The bundle at ${path.basename(bundlePath)} was packed with --format plugin `
       + `(no apm.lock.yaml, flat plugin layout). Either:\n`
       + `  - Re-pack the bundle with bundle-format: apm (or 'apm pack --format apm'), or\n`
-      + `  - Restore the plugin bundle yourself using your plugin tooling.\n`
-      + `Tracking: plugin-bundle restore is planned via 'apm unpack' upstream.`,
+      + `  - Restore the plugin bundle yourself using your plugin tooling (e.g. Claude Code plugin install).`,
     );
   }
 

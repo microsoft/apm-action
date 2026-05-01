@@ -11,7 +11,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 - **`setup-only` mode** ([#24](https://github.com/microsoft/apm-action/issues/24)). New input `setup-only: 'true'` installs the APM CLI onto `PATH` and exits, mirroring the `actions/setup-node` pattern. No `apm.yml` is read, no `apm install` runs, no primitives are deployed. Lets workflows compose `apm` invocations imperatively across multiple steps.
 - **`bundle-format` input.** New input controls the layout produced by `apm pack`: `apm` (default, restorable by this action) or `plugin` (Claude Code marketplace layout). Defaults to `apm` so existing pack -> restore round-trips keep working regardless of changes to the `apm pack` CLI default.
 - **`apm-version` output.** Resolved APM CLI version string. Always set.
-- **`apm-path` output.** Absolute path to the resolved `apm` binary. Empty when reusing a CLI already on `PATH`.
+- **`apm-path` output.** Absolute path to the resolved `apm` binary. Resolved via tool-cache when the action installed APM, or via `which apm` when reusing a pre-existing CLI on `PATH`.
 - **`bundle-format` output.** Format of the produced or restored bundle. Set in pack and single-bundle restore modes.
 - **Plugin-bundle detection.** Single-bundle and multi-bundle restore paths detect plugin-format archives via `tar tzf` and reject them with an actionable error message that names the archive and points at the upstream tracking issue. Prevents silent corruption when a plugin bundle is fed into a restore step.
 

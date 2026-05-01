@@ -78,7 +78,7 @@ inputs:
     required: false
     default: ''
   setup-only:
-    description: 'Install the APM CLI onto PATH and exit. Skips apm install and all project-level operations. Use subsequent steps to run apm commands directly. Mutually exclusive with pack, bundle, bundles-file, isolated, compile, script, dependencies, audit-report, target, archive, bundle-format.'
+    description: 'Install the APM CLI onto PATH and exit. Skips apm install and all project-level operations. Use subsequent steps to run apm commands directly. Mutually exclusive with pack, bundle, bundles-file, isolated, compile, script, dependencies, audit-report, target, bundle-format.'
     required: false
     default: 'false'
 
@@ -96,9 +96,9 @@ outputs:
   bundles-restored:
     description: 'Number of bundles successfully restored (multi-bundle mode only).'
   apm-version:
-    description: 'Resolved APM CLI version string (e.g. "0.11.0"). Set in setup-only mode.'
+    description: 'Resolved APM CLI version string (e.g. "0.11.0"). Always set.'
   apm-path:
-    description: 'Full path to the apm executable that was installed. Set in setup-only mode (empty when reusing a pre-existing apm on PATH).'
+    description: 'Full path to the apm executable used by the action. Resolved via tool-cache when the action installed APM, or via `which apm` when reusing a pre-existing apm on PATH.'
 
 runs:
   using: 'node24'
