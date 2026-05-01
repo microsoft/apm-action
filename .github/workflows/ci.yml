@@ -234,6 +234,18 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      - name: Snapshot pre-action .github tree
+        id: snap
+        run: |
+          # Capture .github contents before invoking the action so we can
+          # detect whether setup-only deployed anything (the apm-action repo
+          # itself ships .github/agents/, .github/aw/, .github/workflows/).
+          if [ -d .github ]; then
+            find .github -mindepth 1 -maxdepth 2 -type d | sort > /tmp/github-before.txt
+          else
+            : > /tmp/github-before.txt
+          fi
+
       - name: Run action in setup-only mode
         id: setup
         uses: ./
@@ -250,15 +262,28 @@ jobs:
             echo "::error::apm-version output not set"
             exit 1
           fi
+          if [ -z "${{ steps.setup.outputs.apm-path }}" ]; then
+            echo "::error::apm-path output not set"
+            exit 1
+          fi
           echo "Resolved apm-version: ${{ steps.setup.outputs.apm-version }}"
           echo "Resolved apm-path: ${{ steps.setup.outputs.apm-path }}"
           echo "apm --version reports: $(apm --version)"
 
-      - name: Verify no install ran (no .github/ deployed)
+      - name: Verify no install ran (no new primitives, no apm.lock.yaml)
         run: |
-          if [ -d .github/agents ] || [ -d .github/skills ] || [ -d .github/instructions ] || [ -d .github/prompts ]; then
-            echo "::error::setup-only deployed primitives (it should not)"
-            ls -la .github/ || true
+          if [ -d .github ]; then
+            find .github -mindepth 1 -maxdepth 2 -type d | sort > /tmp/github-after.txt
+          else
+            : > /tmp/github-after.txt
+          fi
+          if ! diff -q /tmp/github-before.txt /tmp/github-after.txt >/dev/null; then
+            echo "::error::setup-only modified .github/ tree"
+            diff /tmp/github-before.txt /tmp/github-after.txt || true
+            exit 1
+          fi
+          if [ -f apm.lock.yaml ]; then
+            echo "::error::setup-only generated apm.lock.yaml (apm install must not have run)"
             exit 1
           fi
           echo "setup-only correctly skipped install"
