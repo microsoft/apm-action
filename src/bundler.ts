@@ -78,8 +78,13 @@ export async function detectBundleFormat(bundlePath: string): Promise<BundleForm
   }
 
   const entries = list.stdout.split('\n').map(l => l.trim()).filter(Boolean);
-  const hasLockfile = entries.some(e => /(^|\/)apm\.lock\.yaml$/.test(e));
-  const hasPluginJson = entries.some(e => /(^|\/)plugin\.json$/.test(e));
+  // APM and plugin bundles always wrap their contents in a single top-level
+  // directory named after the package (e.g. `roundtrip-1.0.0/`). Match the
+  // format markers ONLY at that depth to avoid false positives from a nested
+  // file that happens to be named `plugin.json` or `apm.lock.yaml` inside a
+  // dependency's payload (e.g. a plugin that ships its own example fixtures).
+  const hasLockfile = entries.some(e => /^[^/]+\/apm\.lock\.yaml$/.test(e));
+  const hasPluginJson = entries.some(e => /^[^/]+\/plugin\.json$/.test(e));
 
   if (hasLockfile && hasPluginJson) {
     throw new Error(
@@ -112,11 +117,16 @@ export async function extractBundle(bundlePath: string, outputDir: string): Prom
   const format = await detectBundleFormat(resolvedBundle);
   if (format === 'plugin') {
     throw new Error(
-      `Plugin-format bundle restore is not yet supported by this action. `
+      `Plugin-format bundle restore is not supported by this action. `
       + `The bundle at ${path.basename(bundlePath)} was packed with --format plugin `
-      + `(no apm.lock.yaml, flat plugin layout). Either:\n`
-      + `  - Re-pack the bundle with bundle-format: apm (or 'apm pack --format apm'), or\n`
-      + `  - Restore the plugin bundle yourself using your plugin tooling (e.g. Claude Code plugin install).`,
+      + `(no apm.lock.yaml, flat plugin layout). Note: 'apm unpack' itself also `
+      + `rejects plugin-format bundles -- this is an upstream limitation, not just `
+      + `an action constraint. To fix:\n`
+      + `  1. Re-pack the upstream bundle in apm format. If you control the pack step, `
+      + `set 'bundle-format: apm' on apm-action (this is the action's default), or run `
+      + `'apm pack --format apm --archive' directly.\n`
+      + `  2. If the bundle was published by a third party, restore it with your `
+      + `plugin tooling (e.g. Claude Code plugin install) instead of this action.`,
     );
   }
 

@@ -35,11 +35,14 @@ export interface InstallResult {
  * Uses @actions/tool-cache for downloading, extracting, and caching.
  *
  * Version semantics:
- *   - `apm-version: latest` -- if any apm is already on PATH, reuse it; else
- *     resolve the latest GitHub release and install via tool-cache.
- *   - `apm-version: <pinned>` -- always install the requested version into the
- *     tool-cache (or reuse a tool-cache hit). Never short-circuits to a random
- *     apm that happens to be on PATH; the caller asked for a specific version
- *     and gets that version.
+ *   - `apm-version: latest` -- resolves the latest GitHub release tag, then
+ *     reuses an apm already on PATH ONLY if its version equals the latest
+ *     release. Otherwise installs the latest release via tool-cache. If the
+ *     GitHub Releases API is unreachable, falls back to the PATH apm with a
+ *     warning so the action still works in degraded environments.
+ *   - `apm-version: <pinned>` -- always installs the requested version into
+ *     the tool-cache (or reuses a tool-cache hit). Never short-circuits to a
+ *     random apm that happens to be on PATH; the caller asked for a specific
+ *     version and gets that version.
  */
 export declare function ensureApmInstalled(): Promise<InstallResult>;

@@ -104,24 +104,44 @@ async function probePathVersion(): Promise<string | null> {
  * Uses @actions/tool-cache for downloading, extracting, and caching.
  *
  * Version semantics:
- *   - `apm-version: latest` -- if any apm is already on PATH, reuse it; else
- *     resolve the latest GitHub release and install via tool-cache.
- *   - `apm-version: <pinned>` -- always install the requested version into the
- *     tool-cache (or reuse a tool-cache hit). Never short-circuits to a random
- *     apm that happens to be on PATH; the caller asked for a specific version
- *     and gets that version.
+ *   - `apm-version: latest` -- resolves the latest GitHub release tag, then
+ *     reuses an apm already on PATH ONLY if its version equals the latest
+ *     release. Otherwise installs the latest release via tool-cache. If the
+ *     GitHub Releases API is unreachable, falls back to the PATH apm with a
+ *     warning so the action still works in degraded environments.
+ *   - `apm-version: <pinned>` -- always installs the requested version into
+ *     the tool-cache (or reuses a tool-cache hit). Never short-circuits to a
+ *     random apm that happens to be on PATH; the caller asked for a specific
+ *     version and gets that version.
  */
 export async function ensureApmInstalled(): Promise<InstallResult> {
   const apmVersionInput = (core.getInput('apm-version') || 'latest').trim();
   const wantLatest = apmVersionInput === 'latest' || apmVersionInput === '';
 
   if (wantLatest) {
+    // Resolve the actual latest tag from GitHub FIRST, then decide whether a
+    // pre-existing PATH apm is acceptable. This closes the silent-downgrade
+    // foot-gun where `apm-version: latest` would happily reuse a months-old
+    // apm just because it's already on PATH.
+    let upstreamLatest: string | null = null;
+    try {
+      const resolved = await resolveDownloadUrl('latest');
+      upstreamLatest = resolved.resolvedVersion;
+    } catch (err) {
+      // GitHub API unreachable (rate limit, network issue, etc.). Fall back to
+      // probing PATH so the action still succeeds in degraded environments,
+      // but warn loudly so operators know they may be running stale.
+      const msg = err instanceof Error ? err.message : String(err);
+      core.warning(
+        `Failed to resolve latest APM release from GitHub (${msg}). ` +
+        `Falling back to any apm already on PATH; pin apm-version to a specific ` +
+        `tag (e.g. apm-version: 0.11.0) for reproducibility.`
+      );
+    }
+
     const pathVersion = await probePathVersion();
-    if (pathVersion) {
+    if (pathVersion && (upstreamLatest === null || pathVersion === upstreamLatest)) {
       core.info(`APM ${pathVersion} already available on PATH (apm-version: latest)`);
-      // Resolve the actual binary path so apm-path output is meaningful even
-      // when reusing a pre-existing apm. Falls back to empty string if `which`
-      // fails -- not a hard error since the binary is demonstrably callable.
       let binaryPath = '';
       try {
         const which = await exec.getExecOutput('which', ['apm'], { silent: true });
@@ -130,6 +150,12 @@ export async function ensureApmInstalled(): Promise<InstallResult> {
         // ignore
       }
       return { resolvedVersion: pathVersion, toolDir: '', binaryPath };
+    }
+    if (pathVersion && upstreamLatest !== null && pathVersion !== upstreamLatest) {
+      core.info(
+        `Found apm ${pathVersion} on PATH but latest release is ${upstreamLatest}; ` +
+        `installing fresh to honour apm-version: latest.`
+      );
     }
   }
 

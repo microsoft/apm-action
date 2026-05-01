@@ -235,8 +235,10 @@ async function restoreMultiBundles(bundles, outputDir) {
         const list = pluginBundles.map(b => `  - ${b}`).join('\n');
         throw new Error(`Multi-bundle restore rejected ${pluginBundles.length} plugin-format bundle(s):\n`
             + list + '\n'
-            + 'Plugin-format bundle restore is not yet supported. Re-pack with '
-            + 'bundle-format: apm, or remove these entries from the bundles-file.');
+            + 'Plugin-format bundle restore is not supported (apm unpack itself rejects '
+            + 'plugin tarballs). Re-pack the upstream artifacts with bundle-format: apm '
+            + "(or 'apm pack --format apm --archive'), or remove these entries from the "
+            + 'bundles-file.');
     }
     for (let i = 0; i < total; i++) {
         const bundle = bundles[i];

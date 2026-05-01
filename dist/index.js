@@ -32710,8 +32710,13 @@ async function detectBundleFormat(bundlePath) {
             + (list.stderr.trim() || 'unknown error'));
     }
     const entries = list.stdout.split('\n').map(l => l.trim()).filter(Boolean);
-    const hasLockfile = entries.some(e => /(^|\/)apm\.lock\.yaml$/.test(e));
-    const hasPluginJson = entries.some(e => /(^|\/)plugin\.json$/.test(e));
+    // APM and plugin bundles always wrap their contents in a single top-level
+    // directory named after the package (e.g. `roundtrip-1.0.0/`). Match the
+    // format markers ONLY at that depth to avoid false positives from a nested
+    // file that happens to be named `plugin.json` or `apm.lock.yaml` inside a
+    // dependency's payload (e.g. a plugin that ships its own example fixtures).
+    const hasLockfile = entries.some(e => /^[^/]+\/apm\.lock\.yaml$/.test(e));
+    const hasPluginJson = entries.some(e => /^[^/]+\/plugin\.json$/.test(e));
     if (hasLockfile && hasPluginJson) {
         throw new Error(`Bundle ${external_path_.basename(bundlePath)} contains both apm.lock.yaml and plugin.json -- `
             + `ambiguous format. Re-pack with a single --format value.`);
@@ -32737,11 +32742,16 @@ async function extractBundle(bundlePath, outputDir) {
     // `apm unpack` upstream, not here. See PR description for the deferred RFC.
     const format = await detectBundleFormat(resolvedBundle);
     if (format === 'plugin') {
-        throw new Error(`Plugin-format bundle restore is not yet supported by this action. `
+        throw new Error(`Plugin-format bundle restore is not supported by this action. `
             + `The bundle at ${external_path_.basename(bundlePath)} was packed with --format plugin `
-            + `(no apm.lock.yaml, flat plugin layout). Either:\n`
-            + `  - Re-pack the bundle with bundle-format: apm (or 'apm pack --format apm'), or\n`
-            + `  - Restore the plugin bundle yourself using your plugin tooling (e.g. Claude Code plugin install).`);
+            + `(no apm.lock.yaml, flat plugin layout). Note: 'apm unpack' itself also `
+            + `rejects plugin-format bundles -- this is an upstream limitation, not just `
+            + `an action constraint. To fix:\n`
+            + `  1. Re-pack the upstream bundle in apm format. If you control the pack step, `
+            + `set 'bundle-format: apm' on apm-action (this is the action's default), or run `
+            + `'apm pack --format apm --archive' directly.\n`
+            + `  2. If the bundle was published by a third party, restore it with your `
+            + `plugin tooling (e.g. Claude Code plugin install) instead of this action.`);
     }
     // APM-format path: prefer `apm unpack` (provides verification),
     // fall back to `tar xzf` if APM is unavailable.
@@ -41542,23 +41552,41 @@ async function probePathVersion() {
  * Uses @actions/tool-cache for downloading, extracting, and caching.
  *
  * Version semantics:
- *   - `apm-version: latest` -- if any apm is already on PATH, reuse it; else
- *     resolve the latest GitHub release and install via tool-cache.
- *   - `apm-version: <pinned>` -- always install the requested version into the
- *     tool-cache (or reuse a tool-cache hit). Never short-circuits to a random
- *     apm that happens to be on PATH; the caller asked for a specific version
- *     and gets that version.
+ *   - `apm-version: latest` -- resolves the latest GitHub release tag, then
+ *     reuses an apm already on PATH ONLY if its version equals the latest
+ *     release. Otherwise installs the latest release via tool-cache. If the
+ *     GitHub Releases API is unreachable, falls back to the PATH apm with a
+ *     warning so the action still works in degraded environments.
+ *   - `apm-version: <pinned>` -- always installs the requested version into
+ *     the tool-cache (or reuses a tool-cache hit). Never short-circuits to a
+ *     random apm that happens to be on PATH; the caller asked for a specific
+ *     version and gets that version.
  */
 async function ensureApmInstalled() {
     const apmVersionInput = (lib_core/* getInput */.V4('apm-version') || 'latest').trim();
     const wantLatest = apmVersionInput === 'latest' || apmVersionInput === '';
     if (wantLatest) {
+        // Resolve the actual latest tag from GitHub FIRST, then decide whether a
+        // pre-existing PATH apm is acceptable. This closes the silent-downgrade
+        // foot-gun where `apm-version: latest` would happily reuse a months-old
+        // apm just because it's already on PATH.
+        let upstreamLatest = null;
+        try {
+            const resolved = await resolveDownloadUrl('latest');
+            upstreamLatest = resolved.resolvedVersion;
+        }
+        catch (err) {
+            // GitHub API unreachable (rate limit, network issue, etc.). Fall back to
+            // probing PATH so the action still succeeds in degraded environments,
+            // but warn loudly so operators know they may be running stale.
+            const msg = err instanceof Error ? err.message : String(err);
+            lib_core/* warning */.$e(`Failed to resolve latest APM release from GitHub (${msg}). ` +
+                `Falling back to any apm already on PATH; pin apm-version to a specific ` +
+                `tag (e.g. apm-version: 0.11.0) for reproducibility.`);
+        }
         const pathVersion = await probePathVersion();
-        if (pathVersion) {
+        if (pathVersion && (upstreamLatest === null || pathVersion === upstreamLatest)) {
             lib_core/* info */.pq(`APM ${pathVersion} already available on PATH (apm-version: latest)`);
-            // Resolve the actual binary path so apm-path output is meaningful even
-            // when reusing a pre-existing apm. Falls back to empty string if `which`
-            // fails -- not a hard error since the binary is demonstrably callable.
             let binaryPath = '';
             try {
                 const which = await lib_exec/* getExecOutput */.H('which', ['apm'], { silent: true });
@@ -41569,6 +41597,10 @@ async function ensureApmInstalled() {
                 // ignore
             }
             return { resolvedVersion: pathVersion, toolDir: '', binaryPath };
+        }
+        if (pathVersion && upstreamLatest !== null && pathVersion !== upstreamLatest) {
+            lib_core/* info */.pq(`Found apm ${pathVersion} on PATH but latest release is ${upstreamLatest}; ` +
+                `installing fresh to honour apm-version: latest.`);
         }
     }
     lib_core/* info */.pq(`Installing APM (version: ${apmVersionInput})...`);
