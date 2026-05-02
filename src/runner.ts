@@ -4,7 +4,27 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { ensureApmInstalled } from './installer.js';
-import { resolveLocalBundle, extractBundle, runPackStep } from './bundler.js';
+import { resolveLocalBundle, extractBundle, runPackStep, BundleFormat } from './bundler.js';
+
+/**
+ * Allowed values for the `bundle-format` input.
+ */
+const VALID_BUNDLE_FORMATS: readonly BundleFormat[] = ['apm', 'plugin'];
+
+/**
+ * Resolve and validate the `bundle-format` input. Defaults to 'apm' (this
+ * action's default; INTENTIONALLY not the apm CLI's default, to keep
+ * existing pack/restore round-trips working). Throws on unknown values.
+ */
+function resolveBundleFormat(): BundleFormat {
+  const raw = (core.getInput('bundle-format') || 'apm').trim().toLowerCase();
+  if (!VALID_BUNDLE_FORMATS.includes(raw as BundleFormat)) {
+    throw new Error(
+      `bundle-format must be one of: ${VALID_BUNDLE_FORMATS.join(', ')} (got: '${raw}')`,
+    );
+  }
+  return raw as BundleFormat;
+}
 
 /**
  * Run the APM action: install agent primitives.
@@ -29,7 +49,7 @@ export async function run(): Promise<void> {
     const auditReportInput = core.getInput('audit-report').trim();
 
     // Pass github-token input to APM subprocess as GITHUB_TOKEN.
-    // GitHub Actions does not auto-export input values as env vars —
+    // GitHub Actions does not auto-export input values as env vars --
     // without this, APM runs unauthenticated (rate-limited, no private repo access).
     // Use ??= so a GITHUB_TOKEN already in the environment (e.g., a PAT set via
     // job-level `env:`) is not clobbered by the action's default github.token.
@@ -52,6 +72,60 @@ export async function run(): Promise<void> {
       if (!callerProvidedToken) {
         process.env.GITHUB_APM_PAT ??= githubToken;
       }
+    }
+
+    // SETUP-ONLY MODE: install the APM CLI onto PATH and exit.
+    // Skips apm install, all project-level operations, and the
+    // working-directory existence check. Designed for callers who want
+    // to run their own apm commands in subsequent steps (the setup-node
+    // pattern, see microsoft/apm-action#24).
+    const setupOnly = core.getInput('setup-only') === 'true';
+    if (setupOnly) {
+      // 4-way mutex: setup-only, pack, bundle, bundles-file are exclusive.
+      // We also reject every other input that implies project-level work,
+      // because allowing them silently is the kind of trap that turns a
+      // misconfigured workflow into a 20-minute debugging session.
+      const conflicts: string[] = [];
+      if (packInput) conflicts.push('pack');
+      if (bundleInput) conflicts.push('bundle');
+      if (bundlesFileInput) conflicts.push('bundles-file');
+      if (isolated) conflicts.push('isolated');
+      if (core.getInput('compile') === 'true') conflicts.push('compile');
+      if (core.getInput('script').trim()) conflicts.push('script');
+      if (core.getInput('dependencies').trim()) conflicts.push('dependencies');
+      if (auditReportInput) conflicts.push('audit-report');
+      if (core.getInput('target').trim()) conflicts.push('target');
+      // archive is intentionally NOT in this list: it is a sub-option of
+      // pack mode (toggling tar.gz vs directory output). Rejecting `pack`
+      // already covers it; flagging archive separately surprises users
+      // whose composite-action templates emit `archive: 'true'` by default.
+      if (core.getInput('bundle-format').trim()) conflicts.push('bundle-format');
+      if (conflicts.length > 0) {
+        throw new Error(
+          `'setup-only' is mutually exclusive with: ${conflicts.join(', ')}. `
+          + `setup-only installs the APM CLI onto PATH and exits; remove the `
+          + `conflicting input(s) or set setup-only: false.`,
+        );
+      }
+
+      // working-directory in setup-only is harmless but suspicious if the
+      // user explicitly set a non-default value -- they probably meant to
+      // do project-level work. Warn (not error) so it surfaces in
+      // annotations without breaking workflows.
+      const wd = core.getInput('working-directory');
+      if (wd && wd !== '.') {
+        core.warning(
+          `working-directory='${wd}' is ignored in setup-only mode. `
+          + `Remove the input or unset setup-only.`,
+        );
+      }
+
+      const result = await ensureApmInstalled();
+      core.setOutput('apm-version', result.resolvedVersion);
+      core.setOutput('apm-path', result.binaryPath);
+      core.setOutput('success', 'true');
+      core.info(`APM ${result.resolvedVersion} installed (setup-only mode)`);
+      return;
     }
 
     // 3-way mutex: at most one of pack / bundle / bundles-file.
@@ -118,7 +192,9 @@ export async function run(): Promise<void> {
     // single small download per runner — negligible vs. the cost of a typical
     // agent job, and we get bundle integrity verification for free.
     if (bundleInput) {
-      await ensureApmInstalled();
+      const installResult = await ensureApmInstalled();
+      core.setOutput('apm-version', installResult.resolvedVersion);
+      core.setOutput('apm-path', installResult.binaryPath);
 
       const bundlePath = await resolveLocalBundle(bundleInput, resolvedDir);
       core.info(`Restoring bundle: ${bundlePath}`);
@@ -126,14 +202,15 @@ export async function run(): Promise<void> {
       // Restore mode now installs APM up-front, so the verified `apm unpack`
       // path is the expected outcome. The unverified branch only runs if APM
       // install failed transiently and extractBundle fell through to its tar
-      // fallback — point operators at the install logs, not at re-installing.
+      // fallback -- point operators at the install logs, not at re-installing.
       const verifiedMsg = result.verified
         ? ' (verified)'
-        : ' (unverified — APM install did not complete; see earlier install logs)';
+        : ' (unverified -- APM install did not complete; see earlier install logs)';
       core.info(`Restored ${result.files} file(s)${verifiedMsg}`);
 
       const primitivesPath = path.join(resolvedDir, '.github');
       core.setOutput('primitives-path', primitivesPath);
+      core.setOutput('bundle-format', result.format);
 
       // Run audit on unpacked bundle if report requested
       if (auditReportPath) {
@@ -182,7 +259,9 @@ export async function run(): Promise<void> {
       // additionally probes `apm --version` as a defence-in-depth check so
       // a transient install failure surfaces with a clear error before the
       // first unpack rather than as a generic ENOENT mid-loop.
-      await ensureApmInstalled();
+      const installResult = await ensureApmInstalled();
+      core.setOutput('apm-version', installResult.resolvedVersion);
+      core.setOutput('apm-path', installResult.binaryPath);
       const result = await restoreMultiBundles(bundles, resolvedDir);
 
       core.info(
@@ -192,6 +271,9 @@ export async function run(): Promise<void> {
       const primitivesPath = path.join(resolvedDir, '.github');
       core.setOutput('primitives-path', primitivesPath);
       core.setOutput('bundles-restored', String(result.count));
+      // Multi-bundle restore is APM-format only (plugin bundles are rejected
+      // upstream in restoreMultiBundles), so this output is always 'apm' here.
+      core.setOutput('bundle-format', 'apm');
 
       // Run audit on merged workspace if requested
       if (auditReportPath) {
@@ -204,7 +286,9 @@ export async function run(): Promise<void> {
     }
 
     // 1. Install APM CLI (install + pack modes)
-    await ensureApmInstalled();
+    const installResult = await ensureApmInstalled();
+    core.setOutput('apm-version', installResult.resolvedVersion);
+    core.setOutput('apm-path', installResult.binaryPath);
 
     // 2. Parse inputs
     const depsInput = core.getInput('dependencies').trim();
@@ -265,8 +349,24 @@ export async function run(): Promise<void> {
     if (packInput) {
       const target = core.getInput('target').trim() || undefined;
       const archive = core.getInput('archive') !== 'false';
-      const bundlePath = await runPackStep(resolvedDir, { target, archive });
-      core.setOutput('bundle-path', bundlePath);
+      const bundleFormat = resolveBundleFormat();
+      const packResult = await runPackStep(resolvedDir, {
+        target,
+        archive,
+        format: bundleFormat,
+      });
+      core.setOutput('bundle-path', packResult.bundlePath);
+      core.setOutput('bundle-format', packResult.format);
+    } else {
+      // bundle-format only makes sense with pack: true. Surface the misuse
+      // explicitly rather than silently ignoring the input.
+      const fmtRaw = core.getInput('bundle-format').trim();
+      if (fmtRaw) {
+        throw new Error(
+          `bundle-format='${fmtRaw}' was set but pack is not enabled. `
+          + `Set pack: true to produce a bundle, or remove bundle-format.`,
+        );
+      }
     }
 
     core.setOutput('success', 'true');

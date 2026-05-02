@@ -26,25 +26,27 @@ jest.unstable_mockModule('@actions/core', () => ({
   summary: mockSummary,
 }));
 
-const mockExec = jest.fn<() => Promise<number>>();
+const mockExec = jest.fn<(cmd: string, args?: string[], opts?: unknown) => Promise<number>>();
 const mockGetExecOutput = jest.fn<() => Promise<{ exitCode: number; stdout: string; stderr: string }>>();
 jest.unstable_mockModule('@actions/exec', () => ({
   exec: mockExec,
   getExecOutput: mockGetExecOutput,
 }));
 
-const mockEnsureApmInstalled = jest.fn<() => Promise<void>>();
+const mockEnsureApmInstalled = jest.fn<() => Promise<{ resolvedVersion: string; toolDir: string; binaryPath: string }>>();
 jest.unstable_mockModule('../installer.js', () => ({
   ensureApmInstalled: mockEnsureApmInstalled,
 }));
 
 const mockResolveLocalBundle = jest.fn<() => Promise<string>>();
-const mockExtractBundle = jest.fn<() => Promise<{ files: number; verified: boolean }>>();
-const mockRunPackStep = jest.fn<() => Promise<string>>();
+const mockExtractBundle = jest.fn<() => Promise<{ files: number; verified: boolean; format: 'apm' | 'plugin' }>>();
+const mockRunPackStep = jest.fn<(workingDir: string, opts: { target?: string; archive: boolean; format: 'apm' | 'plugin' }) => Promise<{ bundlePath: string; format: 'apm' | 'plugin' }>>();
+const mockDetectBundleFormat = jest.fn<() => Promise<'apm' | 'plugin'>>();
 jest.unstable_mockModule('../bundler.js', () => ({
   resolveLocalBundle: mockResolveLocalBundle,
   extractBundle: mockExtractBundle,
   runPackStep: mockRunPackStep,
+  detectBundleFormat: mockDetectBundleFormat,
 }));
 
 const { clearPrimitives, run } = await import('../runner.js');
@@ -153,7 +155,7 @@ describe('run', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-action-run-'));
-    mockEnsureApmInstalled.mockResolvedValue(undefined);
+    mockEnsureApmInstalled.mockResolvedValue({ resolvedVersion: '0.11.0', toolDir: '/opt/hostedtoolcache/apm/0.11.0/x64', binaryPath: '/opt/hostedtoolcache/apm/0.11.0/x64/apm' });
     mockExec.mockResolvedValue(0);
     mockGetExecOutput.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
   });
@@ -662,11 +664,11 @@ describe('run (restore mode)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-action-restore-'));
-    mockEnsureApmInstalled.mockResolvedValue(undefined);
+    mockEnsureApmInstalled.mockResolvedValue({ resolvedVersion: '0.11.0', toolDir: '/opt/hostedtoolcache/apm/0.11.0/x64', binaryPath: '/opt/hostedtoolcache/apm/0.11.0/x64/apm' });
     mockExec.mockResolvedValue(0);
     mockGetExecOutput.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     mockResolveLocalBundle.mockImplementation(async () => path.join(tmpDir, 'bundle.tar.gz'));
-    mockExtractBundle.mockResolvedValue({ files: 5, verified: true });
+    mockExtractBundle.mockResolvedValue({ files: 5, verified: true, format: 'apm' });
   });
 
   afterEach(() => {
@@ -721,11 +723,11 @@ describe('3-way mutex (pack / bundle / bundles-file)', () => {
   beforeEach(() => {
     jest.clearAllMocks();
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-action-mutex-'));
-    mockEnsureApmInstalled.mockResolvedValue(undefined);
+    mockEnsureApmInstalled.mockResolvedValue({ resolvedVersion: '0.11.0', toolDir: '/opt/hostedtoolcache/apm/0.11.0/x64', binaryPath: '/opt/hostedtoolcache/apm/0.11.0/x64/apm' });
     mockExec.mockResolvedValue(0);
     mockGetExecOutput.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
     mockResolveLocalBundle.mockImplementation(async () => path.join(tmpDir, 'bundle.tar.gz'));
-    mockExtractBundle.mockResolvedValue({ files: 5, verified: true });
+    mockExtractBundle.mockResolvedValue({ files: 5, verified: true, format: 'apm' });
   });
 
   afterEach(() => {
@@ -797,7 +799,10 @@ describe('3-way mutex (pack / bundle / bundles-file)', () => {
     fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
     fs.mkdirSync(path.join(tmpDir, 'build'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'), 'fake');
-    mockRunPackStep.mockResolvedValue(path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'));
+    mockRunPackStep.mockResolvedValue({
+      bundlePath: path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'),
+      format: 'apm',
+    });
 
     mockGetInput.mockImplementation(inputs({ pack: 'true' }));
     await run();
@@ -829,6 +834,222 @@ describe('3-way mutex (pack / bundle / bundles-file)', () => {
     mockGetInput.mockImplementation(inputs({}));
     await run();
     expect(mockSetFailed).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// setup-only mode (microsoft/apm-action#24)
+// ---------------------------------------------------------------------------
+
+describe('setup-only mode', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-action-setup-'));
+    mockEnsureApmInstalled.mockResolvedValue({
+      resolvedVersion: '0.11.0',
+      toolDir: '/opt/hostedtoolcache/apm/0.11.0/x64',
+      binaryPath: '/opt/hostedtoolcache/apm/0.11.0/x64/apm',
+    });
+    mockExec.mockResolvedValue(0);
+    mockGetExecOutput.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function inputs(over: Partial<Record<string, string>>): (name: unknown) => string {
+    const base: Record<string, string> = {
+      'working-directory': '.',
+      'setup-only': 'true',
+      'apm-version': 'latest',
+      dependencies: '',
+      isolated: 'false',
+      bundle: '',
+      'bundles-file': '',
+      pack: 'false',
+      compile: 'false',
+      script: '',
+      'audit-report': '',
+      target: '',
+      archive: 'true',
+      'bundle-format': '',
+    };
+    const merged = { ...base, ...over };
+    return (name: unknown) => merged[name as string] ?? '';
+  }
+
+  it('installs apm and exits without reading apm.yml or running install', async () => {
+    mockGetInput.mockImplementation(inputs({}));
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    expect(mockEnsureApmInstalled).toHaveBeenCalledTimes(1);
+    expect(mockSetOutput).toHaveBeenCalledWith('apm-version', '0.11.0');
+    expect(mockSetOutput).toHaveBeenCalledWith('apm-path', '/opt/hostedtoolcache/apm/0.11.0/x64/apm');
+    expect(mockSetOutput).toHaveBeenCalledWith('success', 'true');
+    // No project-level apm subprocess (install/unpack/pack) should run.
+    const apmProjectCalls = mockExec.mock.calls.filter(
+      c => c[0] === 'apm' && (c[1]?.[0] === 'install' || c[1]?.[0] === 'pack' || c[1]?.[0] === 'unpack' || c[1]?.[0] === 'compile'),
+    );
+    expect(apmProjectCalls).toHaveLength(0);
+  });
+
+  it('always sets apm-path output even when binaryPath is empty (PATH-reuse)', async () => {
+    mockEnsureApmInstalled.mockResolvedValue({
+      resolvedVersion: '0.11.0',
+      toolDir: '',
+      binaryPath: '',
+    });
+    mockGetInput.mockImplementation(inputs({}));
+    await run();
+
+    expect(mockSetOutput).toHaveBeenCalledWith('apm-version', '0.11.0');
+    expect(mockSetOutput).toHaveBeenCalledWith('apm-path', '');
+  });
+
+  it('rejects setup-only + pack with consolidated error', async () => {
+    mockGetInput.mockImplementation(inputs({ pack: 'true' }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining("'setup-only' is mutually exclusive with: pack"),
+    );
+  });
+
+  it('rejects setup-only + bundle with consolidated error', async () => {
+    mockGetInput.mockImplementation(inputs({ bundle: './x.tar.gz' }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining("'setup-only' is mutually exclusive with: bundle"),
+    );
+  });
+
+  it('lists ALL conflicting inputs in a single error', async () => {
+    mockGetInput.mockImplementation(inputs({
+      pack: 'true',
+      isolated: 'true',
+      compile: 'true',
+      script: 'noop',
+      dependencies: 'foo/bar',
+      'bundle-format': 'plugin',
+    }));
+    await run();
+    const failMsg = (mockSetFailed.mock.calls[0]?.[0] ?? '') as string;
+    expect(failMsg).toContain('pack');
+    expect(failMsg).toContain('isolated');
+    expect(failMsg).toContain('compile');
+    expect(failMsg).toContain('script');
+    expect(failMsg).toContain('dependencies');
+    expect(failMsg).toContain('bundle-format');
+  });
+
+  it('warns (does not error) when working-directory is set to a non-default value', async () => {
+    mockGetInput.mockImplementation(inputs({ 'working-directory': '/some/dir' }));
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    expect(mockWarning).toHaveBeenCalledWith(
+      expect.stringContaining("working-directory='/some/dir' is ignored in setup-only mode"),
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// bundle-format input validation (used with pack: true)
+// ---------------------------------------------------------------------------
+
+describe('bundle-format input', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-action-fmt-'));
+    mockEnsureApmInstalled.mockResolvedValue({
+      resolvedVersion: '0.11.0',
+      toolDir: '/opt/hostedtoolcache/apm/0.11.0/x64',
+      binaryPath: '/opt/hostedtoolcache/apm/0.11.0/x64/apm',
+    });
+    mockExec.mockResolvedValue(0);
+    mockGetExecOutput.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function inputs(over: Partial<Record<string, string>>): (name: unknown) => string {
+    const base: Record<string, string> = {
+      'working-directory': tmpDir,
+      'setup-only': 'false',
+      'apm-version': '0.11.0',
+      dependencies: '',
+      isolated: 'false',
+      bundle: '',
+      'bundles-file': '',
+      pack: 'false',
+      compile: 'false',
+      script: '',
+      'audit-report': '',
+      target: '',
+      archive: 'true',
+      'bundle-format': '',
+    };
+    const merged = { ...base, ...over };
+    return (name: unknown) => merged[name as string] ?? '';
+  }
+
+  it('rejects an invalid bundle-format value', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+    mockGetInput.mockImplementation(inputs({ pack: 'true', 'bundle-format': 'tarball' }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('bundle-format must be one of'),
+    );
+  });
+
+  it('rejects bundle-format set without pack: true', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+    mockGetInput.mockImplementation(inputs({ 'bundle-format': 'plugin' }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining("bundle-format='plugin' was set but pack is not enabled"),
+    );
+  });
+
+  it('passes bundle-format through to runPackStep and sets output', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, 'build'), { recursive: true });
+    mockRunPackStep.mockResolvedValue({
+      bundlePath: path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'),
+      format: 'plugin',
+    });
+
+    mockGetInput.mockImplementation(inputs({ pack: 'true', 'bundle-format': 'plugin' }));
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    const passedOpts = mockRunPackStep.mock.calls[0]?.[1] as { format?: string } | undefined;
+    expect(passedOpts?.format).toBe('plugin');
+    expect(mockSetOutput).toHaveBeenCalledWith('bundle-format', 'plugin');
+  });
+
+  it('defaults to bundle-format: apm when not set with pack: true', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, 'build'), { recursive: true });
+    mockRunPackStep.mockResolvedValue({
+      bundlePath: path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'),
+      format: 'apm',
+    });
+
+    mockGetInput.mockImplementation(inputs({ pack: 'true' }));
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    const passedOpts = mockRunPackStep.mock.calls[0]?.[1] as { format?: string } | undefined;
+    expect(passedOpts?.format).toBe('apm');
+    expect(mockSetOutput).toHaveBeenCalledWith('bundle-format', 'apm');
   });
 });
 

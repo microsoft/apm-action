@@ -6,6 +6,7 @@ import * as core from '@actions/core';
 import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as path from 'path';
+import { detectBundleFormat } from './bundler.js';
 
 /**
  * Env-var denylist stripped from the apm unpack subprocess (B7).
@@ -282,6 +283,29 @@ export async function restoreMultiBundles(
   const resolvedOutput = path.resolve(outputDir);
   const env = buildStrippedEnv();
   const total = bundles.length;
+
+  // Pre-flight: every bundle must be APM-format. Plugin-format bundles are
+  // not yet restorable by this action (different deployment contract; see
+  // extractBundle for the full rationale). Reject the whole batch with a
+  // single error rather than failing mid-loop after partial deployment.
+  const pluginBundles: string[] = [];
+  for (const bundle of bundles) {
+    const fmt = await detectBundleFormat(bundle);
+    if (fmt === 'plugin') {
+      pluginBundles.push(bundle);
+    }
+  }
+  if (pluginBundles.length > 0) {
+    const list = pluginBundles.map(b => `  - ${b}`).join('\n');
+    throw new Error(
+      `Multi-bundle restore rejected ${pluginBundles.length} plugin-format bundle(s):\n`
+      + list + '\n'
+      + 'Plugin-format bundle restore is not supported (apm unpack itself rejects '
+      + 'plugin tarballs). Re-pack the upstream artifacts with bundle-format: apm '
+      + "(or 'apm pack --format apm --archive'), or remove these entries from the "
+      + 'bundles-file.',
+    );
+  }
 
   for (let i = 0; i < total; i++) {
     const bundle = bundles[i];

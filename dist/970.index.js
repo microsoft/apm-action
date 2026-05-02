@@ -18,10 +18,12 @@ export const modules = {
 /* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__webpack_require__.n(fs__WEBPACK_IMPORTED_MODULE_2__);
 /* harmony import */ var path__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(6928);
 /* harmony import */ var path__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(path__WEBPACK_IMPORTED_MODULE_3__);
+/* harmony import */ var _bundler_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(2744);
 // Gap #1 resolution: `apm unpack --dry-run` IS available in the installed apm CLI
 // (verified via `apm unpack --help` during Phase 2). However, full collision
 // detection across N bundles is deferred to a follow-up PR per the design plan;
 // `previewBundleFiles` is therefore stubbed to return an empty CollisionReport.
+
 
 
 
@@ -218,6 +220,26 @@ async function restoreMultiBundles(bundles, outputDir) {
     const resolvedOutput = path__WEBPACK_IMPORTED_MODULE_3__.resolve(outputDir);
     const env = buildStrippedEnv();
     const total = bundles.length;
+    // Pre-flight: every bundle must be APM-format. Plugin-format bundles are
+    // not yet restorable by this action (different deployment contract; see
+    // extractBundle for the full rationale). Reject the whole batch with a
+    // single error rather than failing mid-loop after partial deployment.
+    const pluginBundles = [];
+    for (const bundle of bundles) {
+        const fmt = await (0,_bundler_js__WEBPACK_IMPORTED_MODULE_4__/* .detectBundleFormat */ .ly)(bundle);
+        if (fmt === 'plugin') {
+            pluginBundles.push(bundle);
+        }
+    }
+    if (pluginBundles.length > 0) {
+        const list = pluginBundles.map(b => `  - ${b}`).join('\n');
+        throw new Error(`Multi-bundle restore rejected ${pluginBundles.length} plugin-format bundle(s):\n`
+            + list + '\n'
+            + 'Plugin-format bundle restore is not supported (apm unpack itself rejects '
+            + 'plugin tarballs). Re-pack the upstream artifacts with bundle-format: apm '
+            + "(or 'apm pack --format apm --archive'), or remove these entries from the "
+            + 'bundles-file.');
+    }
     for (let i = 0; i < total; i++) {
         const bundle = bundles[i];
         const human = `bundle ${i + 1} of ${total}`;

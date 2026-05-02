@@ -1,18 +1,24 @@
 import { jest, describe, it, expect, beforeEach, afterEach } from '@jest/globals';
 
 const mockInfo = jest.fn();
+const mockWarning = jest.fn();
 const mockGetInput = jest.fn();
 const mockAddPath = jest.fn();
 
 jest.unstable_mockModule('@actions/core', () => ({
   info: mockInfo,
+  warning: mockWarning,
   getInput: mockGetInput,
   addPath: mockAddPath,
 }));
 
 const mockExec = jest.fn<(cmd: string, args?: string[], opts?: unknown) => Promise<number>>();
+const mockGetExecOutput = jest.fn<
+  (cmd: string, args?: string[], opts?: unknown) => Promise<{ exitCode: number; stdout: string; stderr: string }>
+>();
 jest.unstable_mockModule('@actions/exec', () => ({
   exec: mockExec,
+  getExecOutput: mockGetExecOutput,
 }));
 
 const mockDownloadTool = jest.fn<(url: string) => Promise<string>>();
@@ -174,33 +180,42 @@ describe('ensureApmInstalled', () => {
     globalThis.fetch = originalFetch;
   });
 
-  it('skips install when apm is already available', async () => {
+  it('explicit apm-version always installs the requested version (does not reuse PATH apm)', async () => {
+    // Even if apm is already on PATH at some other version, an explicit
+    // apm-version input must install that version. probePathVersion is not
+    // even consulted for explicit versions.
     mockExec.mockResolvedValue(0);
-    await ensureApmInstalled();
-    expect(mockInfo).toHaveBeenCalledWith('APM already installed');
-    expect(mockDownloadTool).not.toHaveBeenCalled();
+
+    const result = await ensureApmInstalled();
+
+    expect(mockGetExecOutput).not.toHaveBeenCalled();
+    expect(mockDownloadTool).toHaveBeenCalledWith(
+      'https://github.com/microsoft/apm/releases/download/v0.7.5/apm-linux-x86_64.tar.gz',
+    );
+    expect(result.resolvedVersion).toBe('0.7.5');
+    expect(result.binaryPath).toContain('apm');
   });
 
   it('downloads and caches when not in tool cache', async () => {
-    // First exec call (version check) fails, second (verify) succeeds
-    mockExec.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    // Only one exec call now: the post-install --version verify.
+    mockExec.mockResolvedValue(0);
 
     await ensureApmInstalled();
 
     expect(mockDownloadTool).toHaveBeenCalledWith(
-      'https://github.com/microsoft/apm/releases/download/v0.7.5/apm-linux-x86_64.tar.gz'
+      'https://github.com/microsoft/apm/releases/download/v0.7.5/apm-linux-x86_64.tar.gz',
     );
     expect(mockExtractTar).toHaveBeenCalledWith('/tmp/download');
     expect(mockCacheDir).toHaveBeenCalledWith(
       expect.stringContaining('apm-linux-x86_64'),
       'apm',
-      '0.7.5'
+      '0.7.5',
     );
     expect(mockAddPath).toHaveBeenCalledWith('/opt/hostedtoolcache/apm/0.7.5/x64');
   });
 
   it('uses tool cache when available', async () => {
-    mockExec.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    mockExec.mockResolvedValue(0);
     mockFind.mockReturnValue('/opt/hostedtoolcache/apm/0.7.5/x64');
 
     await ensureApmInstalled();
@@ -211,13 +226,76 @@ describe('ensureApmInstalled', () => {
   });
 
   it('throws when verification fails', async () => {
-    // First exec (version check) fails, second (verify) also fails
-    mockExec.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
+    mockExec.mockResolvedValue(1);
 
     await expect(ensureApmInstalled()).rejects.toThrow('APM installation verification failed');
   });
 
-  it('resolves latest when apm-version input is latest', async () => {
+  it('latest reuses apm already on PATH if PATH version equals latest release', async () => {
+    mockGetInput.mockImplementation(((name: string) => {
+      if (name === 'apm-version') return 'latest';
+      if (name === 'github-token') return 'ghp_mock';
+      return '';
+    }) as unknown as () => void);
+    // GH says latest is 0.11.0 -- PATH apm is also 0.11.0 -> reuse.
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ tag_name: 'v0.11.0' }),
+    } as Response);
+    mockGetExecOutput
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'apm 0.11.0\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '/usr/local/bin/apm\n', stderr: '' });
+
+    const result = await ensureApmInstalled();
+
+    expect(mockDownloadTool).not.toHaveBeenCalled();
+    expect(result.resolvedVersion).toBe('0.11.0');
+    expect(result.toolDir).toBe('');
+    expect(result.binaryPath).toBe('/usr/local/bin/apm');
+  });
+
+  it('latest installs fresh when PATH apm is older than latest release', async () => {
+    mockGetInput.mockImplementation(((name: string) => {
+      if (name === 'apm-version') return 'latest';
+      if (name === 'github-token') return 'ghp_mock';
+      return '';
+    }) as unknown as () => void);
+    // GH says latest is 0.11.0 -- PATH apm is 0.7.0 (stale) -> install fresh.
+    mockFetch.mockResolvedValue({
+      ok: true,
+      json: async () => ({ tag_name: 'v0.11.0' }),
+    } as Response);
+    mockGetExecOutput.mockResolvedValueOnce({
+      exitCode: 0, stdout: 'apm 0.7.0\n', stderr: '',
+    });
+    mockExec.mockResolvedValue(0);
+
+    await ensureApmInstalled();
+
+    expect(mockDownloadTool).toHaveBeenCalledWith(
+      'https://github.com/microsoft/apm/releases/download/v0.11.0/apm-linux-x86_64.tar.gz',
+    );
+  });
+
+  it('latest falls back to PATH apm when GitHub Releases API is unreachable', async () => {
+    mockGetInput.mockImplementation(((name: string) => {
+      if (name === 'apm-version') return 'latest';
+      if (name === 'github-token') return 'ghp_mock';
+      return '';
+    }) as unknown as () => void);
+    mockFetch.mockRejectedValue(new Error('network unreachable'));
+    mockGetExecOutput
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'apm 0.10.5\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 0, stdout: '/opt/apm/apm\n', stderr: '' });
+
+    const result = await ensureApmInstalled();
+
+    expect(mockDownloadTool).not.toHaveBeenCalled();
+    expect(result.resolvedVersion).toBe('0.10.5');
+    expect(result.binaryPath).toBe('/opt/apm/apm');
+  });
+
+  it('latest reuses apm on PATH and tolerates failed which probe (binaryPath empty)', async () => {
     mockGetInput.mockImplementation(((name: string) => {
       if (name === 'apm-version') return 'latest';
       if (name === 'github-token') return 'ghp_mock';
@@ -225,15 +303,35 @@ describe('ensureApmInstalled', () => {
     }) as unknown as () => void);
     mockFetch.mockResolvedValue({
       ok: true,
+      json: async () => ({ tag_name: 'v0.11.0' }),
+    } as Response);
+    mockGetExecOutput
+      .mockResolvedValueOnce({ exitCode: 0, stdout: 'apm 0.11.0\n', stderr: '' })
+      .mockResolvedValueOnce({ exitCode: 1, stdout: '', stderr: 'which: command not found' });
+
+    const result = await ensureApmInstalled();
+
+    expect(result.resolvedVersion).toBe('0.11.0');
+    expect(result.binaryPath).toBe('');
+  });
+
+  it('latest installs from GitHub when probe finds no apm on PATH', async () => {
+    mockGetInput.mockImplementation(((name: string) => {
+      if (name === 'apm-version') return 'latest';
+      if (name === 'github-token') return 'ghp_mock';
+      return '';
+    }) as unknown as () => void);
+    mockGetExecOutput.mockResolvedValue({ exitCode: 1, stdout: '', stderr: 'not found' });
+    mockFetch.mockResolvedValue({
+      ok: true,
       json: async () => ({ tag_name: 'v0.7.7' }),
     } as Response);
-    // First call: version check fails, second: verify succeeds
-    mockExec.mockResolvedValueOnce(1).mockResolvedValueOnce(0);
+    mockExec.mockResolvedValue(0);
 
     await ensureApmInstalled();
 
     expect(mockDownloadTool).toHaveBeenCalledWith(
-      'https://github.com/microsoft/apm/releases/download/v0.7.7/apm-linux-x86_64.tar.gz'
+      'https://github.com/microsoft/apm/releases/download/v0.7.7/apm-linux-x86_64.tar.gz',
     );
   });
 });

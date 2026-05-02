@@ -7,6 +7,9 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // ESM mocking: set up mocks before dynamic imports
 const mockExec = jest.fn<(cmd: string, args?: string[], options?: object) => Promise<number>>();
+const mockGetExecOutput = jest.fn<
+  (cmd: string, args?: string[], opts?: unknown) => Promise<{ exitCode: number; stdout: string; stderr: string }>
+>();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const mockGlobCreate = jest.fn<any>();
 
@@ -17,6 +20,7 @@ jest.unstable_mockModule('@actions/core', () => ({
 
 jest.unstable_mockModule('@actions/exec', () => ({
   exec: mockExec,
+  getExecOutput: mockGetExecOutput,
 }));
 
 jest.unstable_mockModule('@actions/glob', () => ({
@@ -106,6 +110,17 @@ describe('extractBundle', () => {
     jest.clearAllMocks();
     fs.mkdirSync(tmpDir, { recursive: true });
     fs.writeFileSync(bundlePath, 'fake-archive');
+    // Default: tar tzf reports an APM-format bundle (apm.lock.yaml present).
+    mockGetExecOutput.mockImplementation(async (cmd, args) => {
+      if (cmd === 'tar' && args?.[0] === 'tzf') {
+        return {
+          exitCode: 0,
+          stdout: 'pkg-1.0.0/\npkg-1.0.0/apm.lock.yaml\npkg-1.0.0/.github/agents/foo.md\n',
+          stderr: '',
+        };
+      }
+      return { exitCode: 1, stdout: '', stderr: '' };
+    });
   });
 
   afterEach(() => {
@@ -182,28 +197,47 @@ describe('runPackStep', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('builds correct args with target and archive', async () => {
+  it('builds correct args with target and archive (apm format)', async () => {
     fs.writeFileSync(path.join(buildDir, 'test-pkg-1.0.0.tar.gz'), 'fake');
     mockExec.mockResolvedValue(0);
 
-    const result = await runPackStep(tmpDir, { target: 'vscode', archive: true });
+    const result = await runPackStep(tmpDir, { target: 'vscode', archive: true, format: 'apm' });
 
     const packCall = mockExec.mock.calls.find(
       c => c[0] === 'apm' && c[1]?.includes('pack')
     );
     expect(packCall).toBeTruthy();
     const args = packCall![1]!;
+    expect(args).toContain('--format');
+    expect(args).toContain('apm');
     expect(args).toContain('--target');
     expect(args).toContain('vscode');
     expect(args).toContain('--archive');
-    expect(result).toContain('test-pkg-1.0.0.tar.gz');
+    expect(result.bundlePath).toContain('test-pkg-1.0.0.tar.gz');
+    expect(result.format).toBe('apm');
+  });
+
+  it('passes --format plugin when format is plugin', async () => {
+    fs.writeFileSync(path.join(buildDir, 'test-pkg-1.0.0.tar.gz'), 'fake');
+    mockExec.mockResolvedValue(0);
+
+    const result = await runPackStep(tmpDir, { archive: true, format: 'plugin' });
+
+    const packCall = mockExec.mock.calls.find(
+      c => c[0] === 'apm' && c[1]?.includes('pack')
+    );
+    expect(packCall).toBeTruthy();
+    const args = packCall![1]!;
+    expect(args).toContain('--format');
+    expect(args).toContain('plugin');
+    expect(result.format).toBe('plugin');
   });
 
   it('builds correct args without target', async () => {
     fs.mkdirSync(path.join(buildDir, 'test-pkg-1.0.0'), { recursive: true });
     mockExec.mockResolvedValue(0);
 
-    const result = await runPackStep(tmpDir, { archive: false });
+    const result = await runPackStep(tmpDir, { archive: false, format: 'apm' });
 
     const packCall = mockExec.mock.calls.find(
       c => c[0] === 'apm' && c[1]?.includes('pack')
@@ -212,7 +246,7 @@ describe('runPackStep', () => {
     const args = packCall![1]!;
     expect(args).not.toContain('--target');
     expect(args).not.toContain('--archive');
-    expect(result).toContain('test-pkg-1.0.0');
+    expect(result.bundlePath).toContain('test-pkg-1.0.0');
   });
 
   it('throws when multiple archives found', async () => {
@@ -220,7 +254,7 @@ describe('runPackStep', () => {
     fs.writeFileSync(path.join(buildDir, 'pkg-b-2.0.tar.gz'), 'fake');
     mockExec.mockResolvedValue(0);
 
-    await expect(runPackStep(tmpDir, { archive: true }))
+    await expect(runPackStep(tmpDir, { archive: true, format: 'apm' }))
       .rejects.toThrow('Multiple .tar.gz archives found in build directory after apm pack');
   });
 
@@ -229,14 +263,14 @@ describe('runPackStep', () => {
     fs.mkdirSync(path.join(buildDir, 'pkg-b'), { recursive: true });
     mockExec.mockResolvedValue(0);
 
-    await expect(runPackStep(tmpDir, { archive: false }))
+    await expect(runPackStep(tmpDir, { archive: false, format: 'apm' }))
       .rejects.toThrow('Multiple bundle directories found in build directory after apm pack');
   });
 
   it('throws when apm pack fails', async () => {
     mockExec.mockResolvedValue(1);
 
-    await expect(runPackStep(tmpDir, { archive: true }))
+    await expect(runPackStep(tmpDir, { archive: true, format: 'apm' }))
       .rejects.toThrow('apm pack failed with exit code 1');
   });
 });
