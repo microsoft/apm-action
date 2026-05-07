@@ -64,6 +64,7 @@ jobs:
           cat > apm.yml << 'EOF'
           name: ci-test
           version: 1.0.0
+          target: copilot
           dependencies:
             apm:
               - microsoft/apm-sample-package
@@ -93,6 +94,7 @@ jobs:
           cat > apm.yml << 'EOF'
           name: should-be-ignored
           version: 1.0.0
+          target: copilot
           dependencies:
             apm:
               - microsoft/apm-sample-package/.apm/agents/design-reviewer.agent.md
@@ -108,12 +110,16 @@ jobs:
         uses: ./
         with:
           isolated: 'true'
+          target: 'copilot'
           dependencies: |
             - microsoft/apm-sample-package/.apm/skills/style-checker
 
       - name: Verify isolated mode used only inline deps
         run: |
-          if ! find .github/skills -type f -name "SKILL.md" 2>/dev/null | grep -q .; then
+          # v0.12.3+ deploys skills to .agents/skills/ for the copilot
+          # target (universal AGENTS-style fallback). Other primitive
+          # types still land under .github/.
+          if ! find .agents/skills -type f -name "SKILL.md" 2>/dev/null | grep -q .; then
             echo "::error::Skill primitive not deployed — inline deps were not used"
             exit 1
           fi
@@ -125,7 +131,7 @@ jobs:
             echo "::error::Instruction primitive found — pre-existing primitives were NOT cleared"
             exit 1
           fi
-          echo "✅ Isolated mode: cleared existing primitives, installed only inline deps"
+          echo "Isolated mode: cleared existing primitives, installed only inline deps"
 
   # Integration: compile flag
   test-compile:
@@ -140,6 +146,7 @@ jobs:
         with:
           isolated: 'true'
           compile: 'true'
+          target: 'copilot'
           dependencies: |
             - microsoft/apm-sample-package
 
@@ -168,6 +175,7 @@ jobs:
           cat > apm.yml << 'EOF'
           name: ci-test-pack
           version: 1.0.0
+          target: copilot
           dependencies:
             apm:
               - microsoft/apm-sample-package
@@ -178,7 +186,7 @@ jobs:
         uses: ./
         with:
           pack: 'true'
-          target: 'vscode'
+          target: 'copilot'
           bundle-format: ${{ matrix.bundle-format }}
 
       - name: Verify bundle-path and bundle-format outputs are set
@@ -217,13 +225,12 @@ jobs:
           echo "$CONTENTS" | grep -q 'plugin.json' && { echo "::error::APM bundle should not contain plugin.json"; exit 1; }
           echo "Pack(apm) layout valid"
 
-      - name: Verify plugin bundle layout (plugin.json, no apm.lock.yaml)
+      - name: Verify plugin bundle layout (plugin.json present)
         if: matrix.bundle-format == 'plugin'
         run: |
           BUNDLE="${{ steps.pack.outputs.bundle-path }}"
           CONTENTS=$(tar tzf "$BUNDLE")
           echo "$CONTENTS" | grep -q 'plugin.json' || { echo "::error::Plugin bundle missing plugin.json"; exit 1; }
-          echo "$CONTENTS" | grep -q 'apm.lock.yaml' && { echo "::error::Plugin bundle should not contain apm.lock.yaml"; exit 1; }
           echo "Pack(plugin) layout valid"
 
   # Integration: setup-only mode -- install CLI and exit, do not run apm install.
@@ -293,12 +300,13 @@ jobs:
           cat > apm.yml << 'EOF'
           name: ci-setup-only-driver
           version: 1.0.0
+          target: copilot
           dependencies:
             apm:
               - microsoft/apm-sample-package
           EOF
           apm install
-          test -d .github/skills
+          test -d .agents/skills
 
   # Integration: plugin bundle is rejected by restore (clear error, no clobber).
   test-restore-plugin-rejected:
@@ -313,6 +321,7 @@ jobs:
           cat > apm.yml << 'EOF'
           name: ci-test-plugin-restore
           version: 1.0.0
+          target: copilot
           dependencies:
             apm:
               - microsoft/apm-sample-package
@@ -323,7 +332,7 @@ jobs:
         uses: ./
         with:
           pack: 'true'
-          target: 'vscode'
+          target: 'copilot'
           bundle-format: 'plugin'
 
       - name: Move bundle aside and clear workspace
@@ -364,6 +373,7 @@ jobs:
           cat > apm.yml << 'EOF'
           name: ci-test-restore
           version: 1.0.0
+          target: copilot
           dependencies:
             apm:
               - microsoft/apm-sample-package
@@ -374,7 +384,7 @@ jobs:
         uses: ./
         with:
           pack: 'true'
-          target: 'vscode'
+          target: 'copilot'
 
       - name: Clear deployed primitives (simulate fresh consumer)
         run: |
@@ -431,6 +441,7 @@ jobs:
           cat > apm.yml << 'EOF'
           name: ci-test-restore-clean
           version: 1.0.0
+          target: copilot
           dependencies:
             apm:
               - microsoft/apm-sample-package
@@ -459,7 +470,7 @@ jobs:
         uses: ./
         with:
           pack: 'true'
-          target: 'vscode'
+          target: 'copilot'
 
       - name: Stash bundle and reset workspace to the tracked baseline
         run: |

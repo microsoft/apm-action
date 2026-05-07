@@ -190,6 +190,52 @@ describe('run', () => {
     expect(mockSetFailed).not.toHaveBeenCalled();
   });
 
+  it('writes target into generated apm.yml when target input set (isolated mode)', async () => {
+    // Regression: APM v0.12.3+ requires an explicit harness signal. When
+    // isolated mode generates apm.yml from inline deps, the action MUST
+    // persist the `target` input into the manifest, otherwise the
+    // subsequent `apm install` exits 2 with "No harness detected".
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'dependencies': return 'microsoft/apm-sample-package';
+        case 'isolated': return 'true';
+        case 'target': return 'claude';
+        case 'pack': return 'false';
+        case 'compile': return 'false';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    const generated = fs.readFileSync(path.join(tmpDir, 'apm.yml'), 'utf-8');
+    expect(generated).toMatch(/^target: claude$/m);
+    expect(mockSetFailed).not.toHaveBeenCalled();
+  });
+
+  it('omits target line when target input not set (isolated mode)', async () => {
+    // Backward compatible: callers that already provide a harness signal
+    // by other means (e.g. checking out a project with .github/) should
+    // not see a spurious target: line.
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'dependencies': return 'microsoft/apm-sample-package';
+        case 'isolated': return 'true';
+        case 'pack': return 'false';
+        case 'compile': return 'false';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    const generated = fs.readFileSync(path.join(tmpDir, 'apm.yml'), 'utf-8');
+    expect(generated).not.toMatch(/^target:/m);
+    expect(mockSetFailed).not.toHaveBeenCalled();
+  });
+
   it('fails fast when working directory does not exist in non-isolated mode', async () => {
     const nonExistentDir = path.join(tmpDir, 'does-not-exist');
 
