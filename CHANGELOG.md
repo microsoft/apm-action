@@ -8,6 +8,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 `microsoft/apm-action@v1` receive minor and patch updates automatically.
 
+## [1.7.0] - 2026-05-07
+
+### Added
+
+- **`target` input now flows into the generated `apm.yml` in isolated mode** ([#33]). Required by APM v0.12.3+, which rejects `apm install` with exit 2 ("No harness detected") when the project has no harness signal. Previously the action discarded the `target:` input in isolated mode, breaking every gh-aw-style consumer that relies on inline `dependencies:` without a checked-in `apm.yml`.
+- **Strict allowlist validation on the `target` input** ([#34]). The value flows verbatim into a generated YAML scalar and into `apm pack --target`. A per-token regex (`^[a-z][a-z0-9-]{0,31}$`, comma-separated for the multi-target form) now rejects newlines, `:`, `#`, quotes, and stray whitespace before any install/audit/compile work runs, closing a YAML-injection / CLI flag-smuggling vector.
+
+### Changed
+
+- **`apm-version` default pinned to `0.12.3`** ([#33], was `latest`). Floating to `latest` exposed every consumer to silent breakage when APM shipped strict harness detection in v0.12.3. Consumers can still opt in to floating with `apm-version: latest`.
+- **`vscode` removed from the documented `target` allowlist** ([#33]). APM v0.12.3 dropped the alias; `copilot` is the supersedence.
+
+### Why these changes
+
+APM v0.12.3 made harness detection strict (no more silent default-to-copilot). Every workflow using this action in isolated mode broke overnight because the action never persisted the `target` input. Fixing the propagation closes the immediate breakage; pinning `apm-version` ensures the next APM behaviour change is opt-in for downstream consumers rather than a Monday-morning incident; and validating the input shuts a YAML/CLI injection hole that the propagation work would otherwise have widened.
+
+[#33]: https://github.com/microsoft/apm-action/pull/33
+[#34]: https://github.com/microsoft/apm-action/pull/34
+
 ## [1.6.0] - 2026-05-02
 
 ### Added
