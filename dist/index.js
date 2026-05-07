@@ -41677,6 +41677,12 @@ async function run() {
         const bundlesFileInput = lib_core/* getInput */.V4('bundles-file').trim();
         const packInput = lib_core/* getInput */.V4('pack') === 'true';
         const isolated = lib_core/* getInput */.V4('isolated') === 'true';
+        // Validate `target` once, up front. The value flows into either the
+        // generated apm.yml (isolated mode) or `apm pack --target` (pack
+        // mode), both of which are unsafe with raw input. Failing here -- before
+        // install/audit/compile/script work -- prevents partial side effects
+        // when a workflow misconfigures `target`.
+        const validatedTarget = parseTargetInput(lib_core/* getInput */.V4('target'));
         const auditReportInput = lib_core/* getInput */.V4('audit-report').trim();
         // Pass github-token input to APM subprocess as GITHUB_TOKEN.
         // GitHub Actions does not auto-export input values as env vars --
@@ -41903,8 +41909,7 @@ async function run() {
             // Clean existing primitives so only inline deps remain
             clearPrimitives(resolvedDir);
             const deps = parseDependencies(depsInput);
-            const targetInput = parseTargetInput(lib_core/* getInput */.V4('target'));
-            await generateManifest(resolvedDir, deps, targetInput);
+            await generateManifest(resolvedDir, deps, validatedTarget);
             await runApm(['install'], resolvedDir);
         }
         else {
@@ -41942,11 +41947,10 @@ async function run() {
         }
         // 8. Pack mode: produce bundle after install
         if (packInput) {
-            const target = parseTargetInput(lib_core/* getInput */.V4('target'));
             const archive = lib_core/* getInput */.V4('archive') !== 'false';
             const bundleFormat = resolveBundleFormat();
             const packResult = await (0,bundler/* runPackStep */.D5)(resolvedDir, {
-                target,
+                target: validatedTarget,
                 archive,
                 format: bundleFormat,
             });

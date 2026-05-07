@@ -272,6 +272,35 @@ describe('run', () => {
     expect(fs.existsSync(path.join(tmpDir, 'apm.yml'))).toBe(false);
   });
 
+  it('rejects unsafe target in pack mode before invoking runPackStep', async () => {
+    // CLI-side defence-in-depth: in pack mode the validated target value
+    // is forwarded to `apm pack --target`, where an unescaped scalar
+    // could smuggle additional CLI flags. Validation must run up-front
+    // (before install/audit/compile) and must short-circuit pack so
+    // runPackStep is never reached with a tainted value.
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'dependencies': return '';
+        case 'isolated': return 'false';
+        case 'pack': return 'true';
+        case 'target': return 'copilot --evil-flag';
+        case 'compile': return 'false';
+        case 'script': return '';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalled();
+    const failMsg = String(mockSetFailed.mock.calls[0][0]);
+    expect(failMsg).toContain("Invalid 'target' input");
+    expect(mockRunPackStep).not.toHaveBeenCalled();
+    expect(mockEnsureApmInstalled).not.toHaveBeenCalled();
+  });
+
   it('accepts comma-separated targets and writes normalised value', async () => {
     mockGetInput.mockImplementation((name: unknown) => {
       switch (name) {

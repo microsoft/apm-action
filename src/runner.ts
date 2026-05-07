@@ -46,6 +46,13 @@ export async function run(): Promise<void> {
     const bundlesFileInput = core.getInput('bundles-file').trim();
     const packInput = core.getInput('pack') === 'true';
     const isolated = core.getInput('isolated') === 'true';
+
+    // Validate `target` once, up front. The value flows into either the
+    // generated apm.yml (isolated mode) or `apm pack --target` (pack
+    // mode), both of which are unsafe with raw input. Failing here -- before
+    // install/audit/compile/script work -- prevents partial side effects
+    // when a workflow misconfigures `target`.
+    const validatedTarget = parseTargetInput(core.getInput('target'));
     const auditReportInput = core.getInput('audit-report').trim();
 
     // Pass github-token input to APM subprocess as GITHUB_TOKEN.
@@ -304,8 +311,7 @@ export async function run(): Promise<void> {
       clearPrimitives(resolvedDir);
 
       const deps = parseDependencies(depsInput);
-      const targetInput = parseTargetInput(core.getInput('target'));
-      await generateManifest(resolvedDir, deps, targetInput);
+      await generateManifest(resolvedDir, deps, validatedTarget);
       await runApm(['install'], resolvedDir);
     } else {
       // Default: install from apm.yml (if present), then add inline deps
@@ -348,11 +354,10 @@ export async function run(): Promise<void> {
 
     // 8. Pack mode: produce bundle after install
     if (packInput) {
-      const target = parseTargetInput(core.getInput('target'));
       const archive = core.getInput('archive') !== 'false';
       const bundleFormat = resolveBundleFormat();
       const packResult = await runPackStep(resolvedDir, {
-        target,
+        target: validatedTarget,
         archive,
         format: bundleFormat,
       });
