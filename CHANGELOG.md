@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 `microsoft/apm-action@v1` receive minor and patch updates automatically.
 
+## [1.7.1] - 2026-05-07
+
+### Fixed
+
+- **Forward `target` input to additive `apm install` invocations** ([#36]). v1.7.0 fixed the isolated-mode path but missed the non-isolated additive path (`apm install <dep>` per inline dep, no `apm.yml` present), which still hit APM v0.12.3 strict harness detection (exit 2, "No harness detected") on any workspace without an on-disk marker. `installDeps()` now appends `--target <value>` to every per-dep call, mirroring what isolated mode achieves via the generated `apm.yml`.
+
+[#36]: https://github.com/microsoft/apm-action/pull/36
+
 ## [1.7.0] - 2026-05-07
 
 ### Added
