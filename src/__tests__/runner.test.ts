@@ -321,6 +321,39 @@ describe('run', () => {
     expect(mockSetFailed).not.toHaveBeenCalled();
   });
 
+  it('forwards --target to additive apm install (non-isolated mode)', async () => {
+    // Regression: APM v0.12.3+ rejects `apm install <pkg>` with exit 2
+    // ("No harness detected") when the workspace has no harness markers.
+    // The non-isolated additive path (apm.yml absent, inline deps present)
+    // must forward the action's `target` input as `--target <value>` on
+    // every per-dep install call, mirroring what isolated mode does via
+    // the generated apm.yml.
+    const installCalls: string[][] = [];
+    mockExec.mockImplementation((cmd: string, args?: string[]) => {
+      if (cmd === 'apm' && args?.[0] === 'install') installCalls.push(args);
+      return Promise.resolve(0);
+    });
+
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'dependencies': return 'microsoft/apm-sample-package';
+        case 'isolated': return 'false';
+        case 'target': return 'copilot';
+        case 'pack': return 'false';
+        case 'compile': return 'false';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    expect(installCalls).toEqual([
+      ['install', 'microsoft/apm-sample-package', '--target', 'copilot'],
+    ]);
+  });
+
   it('fails fast when working directory does not exist in non-isolated mode', async () => {
     const nonExistentDir = path.join(tmpDir, 'does-not-exist');
 

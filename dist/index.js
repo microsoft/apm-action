@@ -41921,7 +41921,7 @@ async function run() {
             // Install extra inline deps additively
             if (depsInput) {
                 const deps = parseDependencies(depsInput);
-                await installDeps(resolvedDir, deps);
+                await installDeps(resolvedDir, deps, validatedTarget);
             }
         }
         // Run content audit if report requested
@@ -42064,15 +42064,21 @@ function parseDependencies(input) {
 }
 /**
  * Install dependencies additively via `apm install <dep>`.
+ *
+ * If `target` is provided it is forwarded as `--target <target>` so APM
+ * v0.12.3+ strict harness detection has an explicit signal. Without it,
+ * additive installs into a workspace with no harness markers
+ * (`.github/copilot-instructions.md`, `.claude/`, `CLAUDE.md`, etc.) exit
+ * with code 2.
  */
-async function installDeps(dir, deps) {
+async function installDeps(dir, deps, target) {
     lib_core/* info */.pq(`Installing ${deps.length} inline dependencies...`);
+    const targetArgs = target ? ['--target', target] : [];
     for (const dep of deps) {
         if (typeof dep === 'string') {
-            await runApm(['install', dep], dir);
+            await runApm(['install', dep, ...targetArgs], dir);
         }
         else {
-            // Object-form: build the install argument
             let installArg = dep.git;
             if (dep.path) {
                 installArg += `#path=${dep.path}`;
@@ -42080,7 +42086,7 @@ async function installDeps(dir, deps) {
             if (dep.ref) {
                 installArg += (installArg.includes('#') ? '&' : '#') + `ref=${dep.ref}`;
             }
-            await runApm(['install', installArg], dir);
+            await runApm(['install', installArg, ...targetArgs], dir);
         }
     }
 }
