@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 `microsoft/apm-action@v1` receive minor and patch updates automatically.
 
+## [1.7.2] - 2026-05-07
+
+### Changed
+
+- **`apm-version` default bumped to `0.12.4`** (was `0.12.3`). Picks up the audit-replay link rewrite fix ([microsoft/apm#1182](https://github.com/microsoft/apm/issues/1182)) so `apm audit --ci` no longer reports false drift on self-package primitives that link to repo-root files. Consumers pinning `apm-version` explicitly are unaffected.
+
 ## [1.7.1] - 2026-05-07
 
 ### Fixed
