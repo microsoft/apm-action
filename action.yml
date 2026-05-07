@@ -66,7 +66,7 @@ inputs:
     required: false
     default: ''
   target:
-    description: 'Target harness: copilot, vscode, claude, cursor, codex, opencode, gemini, windsurf, or a CSV of any of these. Used with pack: true to set the bundle target, and (isolated: true) to declare the install target in the generated apm.yml. APM v0.12.3+ requires an explicit target signal — set this whenever isolated mode is used outside a checkout that already contains a harness marker.'
+    description: 'Target harness: copilot, claude, cursor, codex, opencode, gemini, windsurf, agent-skills, or a CSV of any of these. Used with pack: true to set the bundle target, and (isolated: true) to declare the install target in the generated apm.yml. APM v0.12.3+ requires an explicit target signal — set this whenever isolated mode is used outside a checkout that already contains a harness marker.'
     required: false
     default: ''
   archive:

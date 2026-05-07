@@ -172,7 +172,7 @@ jobs:
           cat > apm.yml << 'EOF'
           name: ci-test-pack
           version: 1.0.0
-          target: vscode
+          target: copilot
           dependencies:
             apm:
               - microsoft/apm-sample-package
@@ -183,7 +183,7 @@ jobs:
         uses: ./
         with:
           pack: 'true'
-          target: 'vscode'
+          target: 'copilot'
           bundle-format: ${{ matrix.bundle-format }}
 
       - name: Verify bundle-path and bundle-format outputs are set
@@ -319,7 +319,7 @@ jobs:
           cat > apm.yml << 'EOF'
           name: ci-test-plugin-restore
           version: 1.0.0
-          target: vscode
+          target: copilot
           dependencies:
             apm:
               - microsoft/apm-sample-package
@@ -330,7 +330,7 @@ jobs:
         uses: ./
         with:
           pack: 'true'
-          target: 'vscode'
+          target: 'copilot'
           bundle-format: 'plugin'
 
       - name: Move bundle aside and clear workspace
@@ -371,7 +371,7 @@ jobs:
           cat > apm.yml << 'EOF'
           name: ci-test-restore
           version: 1.0.0
-          target: vscode
+          target: copilot
           dependencies:
             apm:
               - microsoft/apm-sample-package
@@ -382,7 +382,7 @@ jobs:
         uses: ./
         with:
           pack: 'true'
-          target: 'vscode'
+          target: 'copilot'
 
       - name: Clear deployed primitives (simulate fresh consumer)
         run: |
@@ -439,7 +439,7 @@ jobs:
           cat > apm.yml << 'EOF'
           name: ci-test-restore-clean
           version: 1.0.0
-          target: vscode
+          target: copilot
           dependencies:
             apm:
               - microsoft/apm-sample-package
@@ -468,7 +468,7 @@ jobs:
         uses: ./
         with:
           pack: 'true'
-          target: 'vscode'
+          target: 'copilot'
 
       - name: Stash bundle and reset workspace to the tracked baseline
         run: |
