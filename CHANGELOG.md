@@ -18,7 +18,7 @@ The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 ### Changed
 
 - **`apm-version` default pinned to `0.12.3`** ([#33], was `latest`). Floating to `latest` exposed every consumer to silent breakage when APM shipped strict harness detection in v0.12.3. Consumers can still opt in to floating with `apm-version: latest`.
-- **`vscode` removed from the documented `target` allowlist** ([#33]). APM v0.12.3 dropped the alias; `copilot` is the supersedence.
+- **`vscode` removed from the documented `target` allowlist** ([#33]). APM v0.12.3 dropped the alias; `copilot` is the replacement.
 
 ### Why these changes
 
