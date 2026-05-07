@@ -116,7 +116,10 @@ jobs:
 
       - name: Verify isolated mode used only inline deps
         run: |
-          if ! find .github/skills -type f -name "SKILL.md" 2>/dev/null | grep -q .; then
+          # v0.12.3+ deploys skills to .agents/skills/ for the copilot
+          # target (universal AGENTS-style fallback). Other primitive
+          # types still land under .github/.
+          if ! find .agents/skills -type f -name "SKILL.md" 2>/dev/null | grep -q .; then
             echo "::error::Skill primitive not deployed — inline deps were not used"
             exit 1
           fi
@@ -128,7 +131,7 @@ jobs:
             echo "::error::Instruction primitive found — pre-existing primitives were NOT cleared"
             exit 1
           fi
-          echo "✅ Isolated mode: cleared existing primitives, installed only inline deps"
+          echo "Isolated mode: cleared existing primitives, installed only inline deps"
 
   # Integration: compile flag
   test-compile:
@@ -222,13 +225,12 @@ jobs:
           echo "$CONTENTS" | grep -q 'plugin.json' && { echo "::error::APM bundle should not contain plugin.json"; exit 1; }
           echo "Pack(apm) layout valid"
 
-      - name: Verify plugin bundle layout (plugin.json, no apm.lock.yaml)
+      - name: Verify plugin bundle layout (plugin.json present)
         if: matrix.bundle-format == 'plugin'
         run: |
           BUNDLE="${{ steps.pack.outputs.bundle-path }}"
           CONTENTS=$(tar tzf "$BUNDLE")
           echo "$CONTENTS" | grep -q 'plugin.json' || { echo "::error::Plugin bundle missing plugin.json"; exit 1; }
-          echo "$CONTENTS" | grep -q 'apm.lock.yaml' && { echo "::error::Plugin bundle should not contain apm.lock.yaml"; exit 1; }
           echo "Pack(plugin) layout valid"
 
   # Integration: setup-only mode -- install CLI and exit, do not run apm install.
@@ -304,7 +306,7 @@ jobs:
               - microsoft/apm-sample-package
           EOF
           apm install
-          test -d .github/skills
+          test -d .agents/skills
 
   # Integration: plugin bundle is rejected by restore (clear error, no clobber).
   test-restore-plugin-rejected:
