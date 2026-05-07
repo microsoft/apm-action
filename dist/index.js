@@ -41903,7 +41903,8 @@ async function run() {
             // Clean existing primitives so only inline deps remain
             clearPrimitives(resolvedDir);
             const deps = parseDependencies(depsInput);
-            await generateManifest(resolvedDir, deps);
+            const targetInput = lib_core/* getInput */.V4('target').trim() || undefined;
+            await generateManifest(resolvedDir, deps, targetInput);
             await runApm(['install'], resolvedDir);
         }
         else {
@@ -42110,8 +42111,14 @@ function clearPrimitives(dir) {
 }
 /**
  * Generate a fresh apm.yml from inline dependencies (used with isolated mode).
+ *
+ * If `target` is provided it is written into apm.yml so `apm install` knows
+ * which harness to deploy to. APM v0.12.3+ rejects installs with no harness
+ * signal (no apm.yml target, no --target flag, no on-disk marker like
+ * .github/copilot-instructions.md), so isolated-mode workflows that pass
+ * the `target:` input must have it persisted into the generated manifest.
  */
-function generateManifest(dir, deps) {
+function generateManifest(dir, deps, target) {
     const apmYmlPath = external_path_.join(dir, 'apm.yml');
     const depEntries = deps.map(dep => {
         if (typeof dep === 'string') {
@@ -42127,9 +42134,11 @@ function generateManifest(dir, deps) {
             entry += `\n      alias: ${dep.alias}`;
         return entry;
     });
-    const content = `name: inline-workflow\nversion: 1.0.0\ndependencies:\n  apm:\n${depEntries.join('\n')}\n`;
+    const targetLine = target ? `target: ${target}\n` : '';
+    const content = `name: inline-workflow\nversion: 1.0.0\n${targetLine}dependencies:\n  apm:\n${depEntries.join('\n')}\n`;
     external_fs_.writeFileSync(apmYmlPath, content, 'utf-8');
-    lib_core/* info */.pq(`Generated apm.yml with ${deps.length} dependencies (isolated mode)`);
+    const targetSuffix = target ? ` (target: ${target})` : '';
+    lib_core/* info */.pq(`Generated apm.yml with ${deps.length} dependencies (isolated mode)${targetSuffix}`);
 }
 /**
  * Run an apm command in the given directory.

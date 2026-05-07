@@ -304,7 +304,8 @@ export async function run(): Promise<void> {
       clearPrimitives(resolvedDir);
 
       const deps = parseDependencies(depsInput);
-      await generateManifest(resolvedDir, deps);
+      const targetInput = core.getInput('target').trim() || undefined;
+      await generateManifest(resolvedDir, deps, targetInput);
       await runApm(['install'], resolvedDir);
     } else {
       // Default: install from apm.yml (if present), then add inline deps
@@ -541,8 +542,14 @@ export function clearPrimitives(dir: string): void {
 
 /**
  * Generate a fresh apm.yml from inline dependencies (used with isolated mode).
+ *
+ * If `target` is provided it is written into apm.yml so `apm install` knows
+ * which harness to deploy to. APM v0.12.3+ rejects installs with no harness
+ * signal (no apm.yml target, no --target flag, no on-disk marker like
+ * .github/copilot-instructions.md), so isolated-mode workflows that pass
+ * the `target:` input must have it persisted into the generated manifest.
  */
-function generateManifest(dir: string, deps: Dependency[]): void {
+function generateManifest(dir: string, deps: Dependency[], target?: string): void {
   const apmYmlPath = path.join(dir, 'apm.yml');
 
   const depEntries = deps.map(dep => {
@@ -557,9 +564,11 @@ function generateManifest(dir: string, deps: Dependency[]): void {
     return entry;
   });
 
-  const content = `name: inline-workflow\nversion: 1.0.0\ndependencies:\n  apm:\n${depEntries.join('\n')}\n`;
+  const targetLine = target ? `target: ${target}\n` : '';
+  const content = `name: inline-workflow\nversion: 1.0.0\n${targetLine}dependencies:\n  apm:\n${depEntries.join('\n')}\n`;
   fs.writeFileSync(apmYmlPath, content, 'utf-8');
-  core.info(`Generated apm.yml with ${deps.length} dependencies (isolated mode)`);
+  const targetSuffix = target ? ` (target: ${target})` : '';
+  core.info(`Generated apm.yml with ${deps.length} dependencies (isolated mode)${targetSuffix}`);
 }
 
 /**
