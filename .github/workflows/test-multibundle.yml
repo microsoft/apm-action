@@ -36,6 +36,7 @@ jobs:
           name: test-${{ matrix.org }}
           version: 1.0.0
           description: throwaway fixture for multi-bundle CI
+          target: copilot
           dependencies:
             apm:
               - microsoft/apm-sample-package

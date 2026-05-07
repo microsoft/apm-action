@@ -18,6 +18,7 @@ jobs:
       - name: Run apm-action with inline deps
         uses: microsoft/apm-action@main
         with:
+          target: copilot
           dependencies: |
             - microsoft/apm-sample-package
 
@@ -63,6 +64,7 @@ jobs:
         uses: microsoft/apm-action@main
         with:
           isolated: 'true'
+          target: copilot
           dependencies: |
             - microsoft/apm-sample-package
 
@@ -89,6 +91,7 @@ jobs:
           cat > apm.yml << 'EOF'
           name: action-test
           version: 1.0.0
+          target: copilot
           dependencies:
             apm:
               - microsoft/apm-sample-package
