@@ -46,6 +46,13 @@ export async function run(): Promise<void> {
     const bundlesFileInput = core.getInput('bundles-file').trim();
     const packInput = core.getInput('pack') === 'true';
     const isolated = core.getInput('isolated') === 'true';
+
+    // Validate `target` once, up front. The value flows into either the
+    // generated apm.yml (isolated mode) or `apm pack --target` (pack
+    // mode), both of which are unsafe with raw input. Failing here -- before
+    // install/audit/compile/script work -- prevents partial side effects
+    // when a workflow misconfigures `target`.
+    const validatedTarget = parseTargetInput(core.getInput('target'));
     const auditReportInput = core.getInput('audit-report').trim();
 
     // Pass github-token input to APM subprocess as GITHUB_TOKEN.
@@ -304,8 +311,7 @@ export async function run(): Promise<void> {
       clearPrimitives(resolvedDir);
 
       const deps = parseDependencies(depsInput);
-      const targetInput = core.getInput('target').trim() || undefined;
-      await generateManifest(resolvedDir, deps, targetInput);
+      await generateManifest(resolvedDir, deps, validatedTarget);
       await runApm(['install'], resolvedDir);
     } else {
       // Default: install from apm.yml (if present), then add inline deps
@@ -348,11 +354,10 @@ export async function run(): Promise<void> {
 
     // 8. Pack mode: produce bundle after install
     if (packInput) {
-      const target = core.getInput('target').trim() || undefined;
       const archive = core.getInput('archive') !== 'false';
       const bundleFormat = resolveBundleFormat();
       const packResult = await runPackStep(resolvedDir, {
-        target,
+        target: validatedTarget,
         archive,
         format: bundleFormat,
       });
@@ -538,6 +543,41 @@ export function clearPrimitives(dir: string): void {
       core.info(`Cleared .github/${sub}/`);
     }
   }
+}
+
+/**
+ * Validate and normalise the `target` action input.
+ *
+ * The value flows verbatim into a generated apm.yml scalar (isolated mode)
+ * and into `apm pack --target <value>`. Both surfaces are unsafe with raw
+ * user input: a newline, `#`, `:`, or stray whitespace can break YAML
+ * parsing, inject extra keys, or smuggle CLI flags. Constrain the input
+ * to a strict allowlist pattern that covers every shipped APM harness
+ * name (agent-skills, claude, codex, copilot, cursor, gemini, opencode,
+ * windsurf) and any plausible future addition, while rejecting anything
+ * that could escape the YAML/CLI scalar.
+ *
+ * Accepts a single name or a comma-separated list (APM also supports the
+ * CSV form). Returns undefined for empty input. Throws on any invalid
+ * token so the action fails fast with a clear message instead of writing
+ * a malformed manifest.
+ */
+function parseTargetInput(raw: string): string | undefined {
+  const trimmed = raw.trim();
+  if (!trimmed) return undefined;
+
+  const TOKEN = /^[a-z][a-z0-9-]{0,31}$/;
+  const tokens = trimmed.split(',').map(t => t.trim());
+  for (const tok of tokens) {
+    if (!TOKEN.test(tok)) {
+      throw new Error(
+        `Invalid 'target' input: ${JSON.stringify(tok)}. ` +
+          `Each target must match ${TOKEN.source} ` +
+          `(e.g. copilot, claude, cursor, codex; comma-separated for multi-target).`,
+      );
+    }
+  }
+  return tokens.join(',');
 }
 
 /**

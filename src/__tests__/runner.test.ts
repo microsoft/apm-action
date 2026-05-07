@@ -236,6 +236,91 @@ describe('run', () => {
     expect(mockSetFailed).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ['newline injection', 'copilot\ninjected: true'],
+    ['carriage return', 'copilot\rfoo'],
+    ['comment char', 'copilot # nope'],
+    ['colon adds key', 'copilot: extra'],
+    ['quoting', '"copilot"'],
+    ['leading dash', '-copilot'],
+    ['empty token in CSV', 'copilot,,claude'],
+    ['uppercase', 'Copilot'],
+    ['whitespace token', 'copilot, '],
+  ])('rejects unsafe target input (%s)', async (_label, value) => {
+    // Defence-in-depth: the `target` value flows verbatim into the
+    // generated apm.yml scalar and into `apm pack --target`. Anything
+    // outside [a-z][a-z0-9-]* must be rejected up front so a malicious
+    // or malformed input cannot break YAML, inject extra keys, or
+    // smuggle CLI flags.
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'dependencies': return 'microsoft/apm-sample-package';
+        case 'isolated': return 'true';
+        case 'target': return value;
+        case 'pack': return 'false';
+        case 'compile': return 'false';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalled();
+    const failMsg = String(mockSetFailed.mock.calls[0][0]);
+    expect(failMsg).toContain("Invalid 'target' input");
+    expect(fs.existsSync(path.join(tmpDir, 'apm.yml'))).toBe(false);
+  });
+
+  it('rejects unsafe target in pack mode before invoking runPackStep', async () => {
+    // CLI-side defence-in-depth: in pack mode the validated target value
+    // is forwarded to `apm pack --target`, where an unescaped scalar
+    // could smuggle additional CLI flags. Validation must run up-front
+    // (before install/audit/compile) and must short-circuit pack so
+    // runPackStep is never reached with a tainted value.
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'dependencies': return '';
+        case 'isolated': return 'false';
+        case 'pack': return 'true';
+        case 'target': return 'copilot --evil-flag';
+        case 'compile': return 'false';
+        case 'script': return '';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalled();
+    const failMsg = String(mockSetFailed.mock.calls[0][0]);
+    expect(failMsg).toContain("Invalid 'target' input");
+    expect(mockRunPackStep).not.toHaveBeenCalled();
+    expect(mockEnsureApmInstalled).not.toHaveBeenCalled();
+  });
+
+  it('accepts comma-separated targets and writes normalised value', async () => {
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'dependencies': return 'microsoft/apm-sample-package';
+        case 'isolated': return 'true';
+        case 'target': return ' copilot , claude ';
+        case 'pack': return 'false';
+        case 'compile': return 'false';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    const generated = fs.readFileSync(path.join(tmpDir, 'apm.yml'), 'utf-8');
+    expect(generated).toMatch(/^target: copilot,claude$/m);
+    expect(mockSetFailed).not.toHaveBeenCalled();
+  });
+
   it('fails fast when working directory does not exist in non-isolated mode', async () => {
     const nonExistentDir = path.join(tmpDir, 'does-not-exist');
 
