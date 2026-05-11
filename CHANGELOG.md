@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 `microsoft/apm-action@v1` receive minor and patch updates automatically.
 
+## [1.7.3] - 2026-05-11
+
+### Changed
+
+- **`apm-version` default bumped to `0.13.0`** (was `0.12.4`). Picks up the v0.13.0 release: zero-config private-package auth via the `gh` CLI on github.com/`*.ghe.com`/GHES, `apm install --frozen` for CI-safe read-only installs, GitLab marketplace and install support, target-agnostic local bundles (`apm install <bundle>` resolves the consumer target from project context), `apm install` accepts the YAML list form under `target:`, and several install correctness fixes. The action only invokes `apm install`, `apm compile`, `apm pack`, and `apm audit` -- none of which have breaking changes in v0.13.0. Consumers pinning `apm-version` explicitly are unaffected.
+
 ## [1.7.2] - 2026-05-07
 
 ### Changed
