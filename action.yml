@@ -12,12 +12,12 @@ inputs:
     default: '.'
   apm-version:
     description: |
-      APM CLI version to install (e.g. "0.12.4"). Defaults to a pinned, known-good release.
+      APM CLI version to install (e.g. "0.13.0"). Defaults to a pinned, known-good release.
       The default is intentionally NOT "latest": pinning the action to a specific APM version
       prevents downstream workflows from being broken by an unrelated APM release. Pass
       "latest" explicitly to opt in to floating, or pin to a different tag for reproducibility.
     required: false
-    default: '0.12.4'
+    default: '0.13.0'
   script:
     description: 'APM script to run after install (optional — by default only install runs)'
     required: false
