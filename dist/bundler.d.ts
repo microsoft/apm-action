@@ -27,15 +27,51 @@ export declare function resolveLocalBundle(pattern: string, workspaceDir: string
  */
 export declare function detectBundleFormat(bundlePath: string): Promise<BundleFormat>;
 export declare function extractBundle(bundlePath: string, outputDir: string): Promise<ExtractResult>;
-/**
- * Run `apm pack` after install and return the path to the produced bundle
- * along with the format that was used.
- */
-export declare function runPackStep(workingDir: string, opts: {
+export interface PackOptions {
     target?: string;
     archive: boolean;
     format: BundleFormat;
-}): Promise<{
-    bundlePath: string;
+    /**
+     * Value for `apm pack --marketplace=<value>`. Accepts a comma-separated
+     * list of format names ('claude,codex'), 'all', or 'none'. Forwarded
+     * verbatim to the CLI.
+     */
+    marketplace?: string;
+    /**
+     * Repeatable `--marketplace-path FORMAT=PATH` overrides. Each element
+     * must already be in `FORMAT=PATH` shape (the runner parses caller
+     * input into this list).
+     */
+    marketplacePath?: string[];
+    /** Forward `--offline` to skip network resolution of marketplace refs. */
+    offline?: boolean;
+    /** Forward `--include-prerelease` to consider pre-release version tags. */
+    includePrerelease?: boolean;
+    /**
+     * When set, pass `--json` to `apm pack` and capture stdout to this path.
+     * The CLI routes human-readable logs to stderr in this mode.
+     */
+    jsonOutput?: string;
+}
+export interface PackResult {
+    /**
+     * Path to the produced bundle, or null when the project produced only
+     * marketplace artifacts (no `dependencies:` block in apm.yml). Callers
+     * that need the bundle should error on null; callers that drive
+     * marketplace-only releases should consume `marketplaceJsonPath`.
+     */
+    bundlePath: string | null;
     format: BundleFormat;
-}>;
+    /**
+     * Path to the captured `--json` stdout when `jsonOutput` was set,
+     * otherwise null. Always populated when the JSON capture succeeded,
+     * regardless of bundle presence.
+     */
+    marketplaceJsonPath: string | null;
+}
+/**
+ * Run `apm pack` after install and return the path to the produced bundle
+ * (when one was produced) along with the format and the optional JSON
+ * report path.
+ */
+export declare function runPackStep(workingDir: string, opts: PackOptions): Promise<PackResult>;
