@@ -69,6 +69,49 @@ inputs:
     description: 'Produce .tar.gz instead of directory (used with pack: true)'
     required: false
     default: 'true'
+  marketplace:
+    description: |
+      Forwarded to `apm pack --marketplace=<value>` (used with pack: true).
+      Controls which marketplace formats are emitted alongside the bundle.
+      Accepts a comma-separated list of format names ('claude,codex'),
+      'all' (every configured format), or 'none' (skip marketplace files).
+      Defaults to whatever is configured in apm.yml's `outputs:` map.
+    required: false
+    default: ''
+  marketplace-path:
+    description: |
+      Forwarded to `apm pack --marketplace-path FORMAT=PATH` (used with
+      pack: true). Repeatable: provide one override per line, or
+      comma-separate them on a single line. Each entry must be in
+      `FORMAT=PATH` shape (e.g. `claude=marketplace.json`). Overrides the
+      output path for the named format; useful for placing files at
+      vendor-expected locations within the same release artifact set.
+    required: false
+    default: ''
+  json-output:
+    description: |
+      Forwarded to `apm pack --json` (used with pack: true). When set, the
+      action passes --json to the CLI and captures the JSON report to this
+      path (relative to working-directory, or absolute). The JSON report
+      is the source of truth for what was produced -- consume it from
+      downstream steps via the `pack-json` output.
+    required: false
+    default: ''
+  offline:
+    description: |
+      Forwarded to `apm pack --offline` (used with pack: true). Skips
+      network resolution of marketplace dependency refs. Useful in
+      hermetic CI environments where the resolved versions are already
+      pinned in apm.lock.yaml.
+    required: false
+    default: 'false'
+  include-prerelease:
+    description: |
+      Forwarded to `apm pack --include-prerelease` (used with pack: true).
+      Considers pre-release version tags when resolving marketplace
+      dependency refs. Off by default to keep release builds reproducible.
+    required: false
+    default: 'false'
   github-token:
     description: 'GitHub token for API calls (avoids rate limits). Defaults to the automatic GITHUB_TOKEN.'
     required: false
@@ -78,7 +121,7 @@ inputs:
     required: false
     default: ''
   setup-only:
-    description: 'Install the APM CLI onto PATH and exit. Skips apm install and all project-level operations. Use subsequent steps to run apm commands directly. Mutually exclusive with pack, bundle, bundles-file, isolated, compile, script, dependencies, audit-report, target, bundle-format.'
+    description: 'Install the APM CLI onto PATH and exit. Skips apm install and all project-level operations. Use subsequent steps to run apm commands directly. Mutually exclusive with pack, bundle, bundles-file, isolated, compile, script, dependencies, audit-report, target, bundle-format, marketplace, marketplace-path, json-output, offline, include-prerelease.'
     required: false
     default: 'false'
 
@@ -88,9 +131,11 @@ outputs:
   primitives-path:
     description: 'Path where agent primitives were deployed (.github)'
   bundle-path:
-    description: 'Path to the packed bundle (only set in pack mode)'
+    description: 'Path to the packed bundle (only set in pack mode). Empty string when the project produced only marketplace artifacts (no `dependencies:` block in apm.yml) -- consume `pack-json` to discover what was emitted.'
   bundle-format:
     description: 'Format of the produced or restored bundle: "apm" or "plugin". Set in pack mode and single-bundle restore mode.'
+  pack-json:
+    description: 'Path to the captured `apm pack --json` report (set when the `json-output` input was provided). Contains the structured list of every artifact produced by the pack -- bundles, marketplace files, sidecars. Source of truth for downstream steps that need to enumerate outputs without globbing the build/ directory.'
   audit-report-path:
     description: 'Path to the generated SARIF audit report, if audit-report was enabled'
   bundles-restored:

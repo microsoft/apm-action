@@ -40,7 +40,20 @@ jest.unstable_mockModule('../installer.js', () => ({
 
 const mockResolveLocalBundle = jest.fn<() => Promise<string>>();
 const mockExtractBundle = jest.fn<() => Promise<{ files: number; verified: boolean; format: 'apm' | 'plugin' }>>();
-const mockRunPackStep = jest.fn<(workingDir: string, opts: { target?: string; archive: boolean; format: 'apm' | 'plugin' }) => Promise<{ bundlePath: string; format: 'apm' | 'plugin' }>>();
+const mockRunPackStep = jest.fn<(workingDir: string, opts: {
+  target?: string;
+  archive: boolean;
+  format: 'apm' | 'plugin';
+  marketplace?: string;
+  marketplacePath?: string[];
+  offline?: boolean;
+  includePrerelease?: boolean;
+  jsonOutput?: string;
+}) => Promise<{
+  bundlePath: string | null;
+  format: 'apm' | 'plugin';
+  marketplaceJsonPath: string | null;
+}>>();
 const mockDetectBundleFormat = jest.fn<() => Promise<'apm' | 'plugin'>>();
 jest.unstable_mockModule('../bundler.js', () => ({
   resolveLocalBundle: mockResolveLocalBundle,
@@ -802,6 +815,7 @@ describe('3-way mutex (pack / bundle / bundles-file)', () => {
     mockRunPackStep.mockResolvedValue({
       bundlePath: path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'),
       format: 'apm',
+      marketplaceJsonPath: null,
     });
 
     mockGetInput.mockImplementation(inputs({ pack: 'true' }));
@@ -934,6 +948,11 @@ describe('setup-only mode', () => {
       script: 'noop',
       dependencies: 'foo/bar',
       'bundle-format': 'plugin',
+      marketplace: 'claude',
+      'marketplace-path': 'claude=marketplace.json',
+      'json-output': 'pack.json',
+      offline: 'true',
+      'include-prerelease': 'true',
     }));
     await run();
     const failMsg = (mockSetFailed.mock.calls[0]?.[0] ?? '') as string;
@@ -943,6 +962,21 @@ describe('setup-only mode', () => {
     expect(failMsg).toContain('script');
     expect(failMsg).toContain('dependencies');
     expect(failMsg).toContain('bundle-format');
+    expect(failMsg).toContain('marketplace');
+    expect(failMsg).toContain('marketplace-path');
+    expect(failMsg).toContain('json-output');
+    expect(failMsg).toContain('offline');
+    expect(failMsg).toContain('include-prerelease');
+  });
+
+  it('rejects setup-only + marketplace pass-through inputs', async () => {
+    mockGetInput.mockImplementation(inputs({
+      marketplace: 'claude',
+    }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining("'setup-only' is mutually exclusive with: marketplace"),
+    );
   });
 
   it('warns (does not error) when working-directory is set to a non-default value', async () => {
@@ -1024,6 +1058,7 @@ describe('bundle-format input', () => {
     mockRunPackStep.mockResolvedValue({
       bundlePath: path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'),
       format: 'plugin',
+      marketplaceJsonPath: null,
     });
 
     mockGetInput.mockImplementation(inputs({ pack: 'true', 'bundle-format': 'plugin' }));
@@ -1041,6 +1076,7 @@ describe('bundle-format input', () => {
     mockRunPackStep.mockResolvedValue({
       bundlePath: path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'),
       format: 'apm',
+      marketplaceJsonPath: null,
     });
 
     mockGetInput.mockImplementation(inputs({ pack: 'true' }));
@@ -1050,6 +1086,183 @@ describe('bundle-format input', () => {
     const passedOpts = mockRunPackStep.mock.calls[0]?.[1] as { format?: string } | undefined;
     expect(passedOpts?.format).toBe('apm');
     expect(mockSetOutput).toHaveBeenCalledWith('bundle-format', 'apm');
+  });
+});
+
+describe('pack pass-through inputs (marketplace, json, offline, prerelease)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-action-pkpass-'));
+    mockEnsureApmInstalled.mockResolvedValue({
+      resolvedVersion: '0.14.0',
+      toolDir: '/opt/hostedtoolcache/apm/0.14.0/x64',
+      binaryPath: '/opt/hostedtoolcache/apm/0.14.0/x64/apm',
+    });
+    mockExec.mockResolvedValue(0);
+    mockGetExecOutput.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function inputs(over: Partial<Record<string, string>>): (name: unknown) => string {
+    const base: Record<string, string> = {
+      'working-directory': tmpDir,
+      'setup-only': 'false',
+      'apm-version': '0.14.0',
+      dependencies: '',
+      isolated: 'false',
+      bundle: '',
+      'bundles-file': '',
+      pack: 'false',
+      compile: 'false',
+      script: '',
+      'audit-report': '',
+      target: '',
+      archive: 'true',
+      'bundle-format': '',
+      marketplace: '',
+      'marketplace-path': '',
+      'json-output': '',
+      offline: 'false',
+      'include-prerelease': 'false',
+    };
+    const merged = { ...base, ...over };
+    return (name: unknown) => merged[name as string] ?? '';
+  }
+
+  function seedApmYml(): void {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+  }
+
+  it('forwards marketplace, marketplace-path, offline, include-prerelease, json-output to runPackStep', async () => {
+    seedApmYml();
+    mockRunPackStep.mockResolvedValue({
+      bundlePath: path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'),
+      format: 'apm',
+      marketplaceJsonPath: path.join(tmpDir, 'pack.json'),
+    });
+
+    mockGetInput.mockImplementation(inputs({
+      pack: 'true',
+      marketplace: 'claude,codex',
+      'marketplace-path': 'claude=marketplace.json\ncodex=plugins.toml',
+      'json-output': 'pack.json',
+      offline: 'true',
+      'include-prerelease': 'true',
+    }));
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    const opts = mockRunPackStep.mock.calls[0]?.[1] as {
+      marketplace?: string;
+      marketplacePath?: string[];
+      offline?: boolean;
+      includePrerelease?: boolean;
+      jsonOutput?: string;
+    } | undefined;
+    expect(opts?.marketplace).toBe('claude,codex');
+    expect(opts?.marketplacePath).toEqual(['claude=marketplace.json', 'codex=plugins.toml']);
+    expect(opts?.offline).toBe(true);
+    expect(opts?.includePrerelease).toBe(true);
+    expect(opts?.jsonOutput).toBe('pack.json');
+    expect(mockSetOutput).toHaveBeenCalledWith('pack-json', path.join(tmpDir, 'pack.json'));
+  });
+
+  it('parses comma-separated marketplace-path entries', async () => {
+    seedApmYml();
+    mockRunPackStep.mockResolvedValue({
+      bundlePath: path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'),
+      format: 'apm',
+      marketplaceJsonPath: null,
+    });
+
+    mockGetInput.mockImplementation(inputs({
+      pack: 'true',
+      'marketplace-path': 'claude=a.json, codex=b.toml',
+    }));
+    await run();
+
+    const opts = mockRunPackStep.mock.calls[0]?.[1] as {
+      marketplacePath?: string[];
+    } | undefined;
+    expect(opts?.marketplacePath).toEqual(['claude=a.json', 'codex=b.toml']);
+  });
+
+  it('rejects malformed marketplace-path entries', async () => {
+    seedApmYml();
+    mockGetInput.mockImplementation(inputs({
+      pack: 'true',
+      'marketplace-path': 'not-format-equals-path',
+    }));
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining("must be in 'FORMAT=PATH' shape"),
+    );
+  });
+
+  it('emits empty bundle-path output when bundlePath is null (marketplace-only project)', async () => {
+    seedApmYml();
+    mockRunPackStep.mockResolvedValue({
+      bundlePath: null,
+      format: 'apm',
+      marketplaceJsonPath: path.join(tmpDir, 'pack.json'),
+    });
+
+    mockGetInput.mockImplementation(inputs({
+      pack: 'true',
+      marketplace: 'claude',
+      'json-output': 'pack.json',
+    }));
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    expect(mockSetOutput).toHaveBeenCalledWith('bundle-path', '');
+    expect(mockSetOutput).toHaveBeenCalledWith('pack-json', path.join(tmpDir, 'pack.json'));
+  });
+
+  it('emits empty pack-json output when json-output input is unset', async () => {
+    seedApmYml();
+    mockRunPackStep.mockResolvedValue({
+      bundlePath: path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'),
+      format: 'apm',
+      marketplaceJsonPath: null,
+    });
+
+    mockGetInput.mockImplementation(inputs({ pack: 'true' }));
+    await run();
+
+    expect(mockSetOutput).toHaveBeenCalledWith('pack-json', '');
+  });
+
+  it('rejects marketplace-path set without pack: true', async () => {
+    seedApmYml();
+    mockGetInput.mockImplementation(inputs({
+      'marketplace-path': 'claude=marketplace.json',
+    }));
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('marketplace-path was set but pack is not enabled'),
+    );
+  });
+
+  it('rejects marketplace + json-output + offline together when pack is false', async () => {
+    seedApmYml();
+    mockGetInput.mockImplementation(inputs({
+      marketplace: 'claude',
+      'json-output': 'pack.json',
+      offline: 'true',
+    }));
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('marketplace, json-output, offline was set but pack is not enabled'),
+    );
   });
 });
 

@@ -32797,7 +32797,8 @@ async function extractBundle(bundlePath, outputDir) {
 }
 /**
  * Run `apm pack` after install and return the path to the produced bundle
- * along with the format that was used.
+ * (when one was produced) along with the format and the optional JSON
+ * report path.
  */
 async function runPackStep(workingDir, opts) {
     const resolvedDir = external_path_.resolve(workingDir);
@@ -32812,34 +32813,97 @@ async function runPackStep(workingDir, opts) {
     if (opts.archive) {
         args.push('--archive');
     }
+    if (opts.marketplace !== undefined && opts.marketplace !== '') {
+        args.push('--marketplace', opts.marketplace);
+    }
+    if (opts.marketplacePath && opts.marketplacePath.length > 0) {
+        for (const override of opts.marketplacePath) {
+            args.push('--marketplace-path', override);
+        }
+    }
+    if (opts.offline) {
+        args.push('--offline');
+    }
+    if (opts.includePrerelease) {
+        args.push('--include-prerelease');
+    }
+    if (opts.jsonOutput) {
+        args.push('--json');
+    }
     lib_core/* info */.pq(`Running: apm ${args.join(' ')}`);
-    const rc = await exec/* exec */.m('apm', args, {
+    // When --json is requested, capture stdout in-memory and persist it to
+    // the requested path. Logs continue to flow through stderr (the CLI
+    // routes human output to stderr under --json).
+    const jsonChunks = [];
+    const execOpts = {
         cwd: resolvedDir,
         ignoreReturnCode: true,
         env: { ...process.env },
-    });
+    };
+    if (opts.jsonOutput) {
+        execOpts.silent = true;
+        execOpts.listeners = {
+            stdout: (data) => {
+                jsonChunks.push(Buffer.from(data));
+            },
+        };
+    }
+    const rc = await exec/* exec */.m('apm', args, execOpts);
     if (rc !== 0) {
         throw new Error(`apm pack failed with exit code ${rc}`);
     }
-    // Find the produced bundle in build/
-    const bundlePath = findBundle(buildDir, opts.archive);
-    lib_core/* info */.pq(`Bundle produced: ${bundlePath}`);
-    return { bundlePath, format: opts.format };
+    let marketplaceJsonPath = null;
+    if (opts.jsonOutput) {
+        const resolvedJsonPath = external_path_.isAbsolute(opts.jsonOutput)
+            ? opts.jsonOutput
+            : external_path_.join(resolvedDir, opts.jsonOutput);
+        external_fs_.mkdirSync(external_path_.dirname(resolvedJsonPath), { recursive: true });
+        external_fs_.writeFileSync(resolvedJsonPath, Buffer.concat(jsonChunks));
+        marketplaceJsonPath = resolvedJsonPath;
+        lib_core/* info */.pq(`Pack JSON report written to: ${resolvedJsonPath}`);
+    }
+    // Marketplace-only projects (no `dependencies:` block in apm.yml)
+    // produce no bundle. Detect that case instead of throwing.
+    const bundlePath = findBundleOrNull(buildDir, opts.archive);
+    if (bundlePath !== null) {
+        lib_core/* info */.pq(`Bundle produced: ${bundlePath}`);
+    }
+    else if (marketplaceJsonPath !== null) {
+        lib_core/* info */.pq('No bundle produced (marketplace-only project); see pack JSON report.');
+    }
+    else {
+        // No bundle and no JSON report to fall back on -- this is the only
+        // path that should still be a hard error for legacy callers.
+        throw new Error('apm pack produced no bundle. If this is a marketplace-only project, '
+            + 'set the json-output input so the action can surface the marketplace '
+            + 'artifacts.');
+    }
+    return { bundlePath, format: opts.format, marketplaceJsonPath };
 }
 /**
  * Find the bundle output in the build directory.
  * For archives: look for .tar.gz files.
  * For directories: look for non-hidden directories.
+ *
+ * Returns null when the build directory is missing or contains no bundle
+ * candidate. Marketplace-only projects (no `dependencies:` block in
+ * apm.yml) legitimately produce no bundle; callers that have other
+ * evidence of success (such as a captured `--json` report) treat null as
+ * a non-error. Callers that require a bundle should error on null.
+ *
+ * Still throws on ambiguity (multiple bundle candidates in one build
+ * dir) -- that condition almost always indicates a stale build/ from a
+ * previous pack and is worth surfacing as a hard error.
  */
-function findBundle(buildDir, archive) {
+function findBundleOrNull(buildDir, archive) {
     if (!external_fs_.existsSync(buildDir)) {
-        throw new Error(`Build directory not found: ${buildDir}`);
+        return null;
     }
     const entries = external_fs_.readdirSync(buildDir);
     if (archive) {
         const archives = entries.filter(e => e.endsWith('.tar.gz')).sort();
         if (archives.length === 0) {
-            throw new Error('No .tar.gz archive found in build directory after apm pack');
+            return null;
         }
         if (archives.length > 1) {
             throw new Error(`Multiple .tar.gz archives found in build directory after apm pack: ${archives.join(', ')}`);
@@ -32853,7 +32917,7 @@ function findBundle(buildDir, archive) {
         return external_fs_.statSync(external_path_.join(buildDir, e)).isDirectory();
     }).sort();
     if (dirs.length === 0) {
-        throw new Error('No bundle directory found in build directory after apm pack');
+        return null;
     }
     if (dirs.length > 1) {
         throw new Error(`Multiple bundle directories found in build directory after apm pack: ${dirs.join(', ')}`);
@@ -41658,6 +41722,34 @@ function resolveBundleFormat() {
     return raw;
 }
 /**
+ * Parse the `marketplace-path` input into a list of `FORMAT=PATH`
+ * overrides suitable for forwarding as repeated `--marketplace-path`
+ * arguments. Accepts:
+ *   - newline-separated entries (one override per line)
+ *   - comma-separated entries (one override per item)
+ *   - a single entry on one line
+ *
+ * Empty/blank lines are stripped. Lines that do not match `FORMAT=PATH`
+ * are surfaced as errors -- silently dropping them turns into a debugging
+ * trap when CI emits the "wrong" file.
+ */
+function parseMarketplacePath(raw) {
+    const trimmed = raw.trim();
+    if (!trimmed)
+        return [];
+    const items = trimmed
+        .split(/[\n,]/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+    for (const item of items) {
+        if (!/^[A-Za-z0-9_-]+=.+$/.test(item)) {
+            throw new Error(`marketplace-path entries must be in 'FORMAT=PATH' shape (got: '${item}'). `
+                + `Provide one override per line or comma-separate them.`);
+        }
+    }
+    return items;
+}
+/**
  * Run the APM action: install agent primitives.
  *
  * Default behavior (no inputs): reads apm.yml, runs apm install. Done.
@@ -41739,6 +41831,16 @@ async function run() {
             // whose composite-action templates emit `archive: 'true'` by default.
             if (lib_core/* getInput */.V4('bundle-format').trim())
                 conflicts.push('bundle-format');
+            if (lib_core/* getInput */.V4('marketplace').trim())
+                conflicts.push('marketplace');
+            if (lib_core/* getInput */.V4('marketplace-path').trim())
+                conflicts.push('marketplace-path');
+            if (lib_core/* getInput */.V4('json-output').trim())
+                conflicts.push('json-output');
+            if (lib_core/* getInput */.V4('offline') === 'true')
+                conflicts.push('offline');
+            if (lib_core/* getInput */.V4('include-prerelease') === 'true')
+                conflicts.push('include-prerelease');
             if (conflicts.length > 0) {
                 throw new Error(`'setup-only' is mutually exclusive with: ${conflicts.join(', ')}. `
                     + `setup-only installs the APM CLI onto PATH and exits; remove the `
@@ -41944,13 +42046,26 @@ async function run() {
             const target = lib_core/* getInput */.V4('target').trim() || undefined;
             const archive = lib_core/* getInput */.V4('archive') !== 'false';
             const bundleFormat = resolveBundleFormat();
+            const marketplace = lib_core/* getInput */.V4('marketplace').trim() || undefined;
+            const marketplacePath = parseMarketplacePath(lib_core/* getInput */.V4('marketplace-path'));
+            const offline = lib_core/* getInput */.V4('offline') === 'true';
+            const includePrerelease = lib_core/* getInput */.V4('include-prerelease') === 'true';
+            const jsonOutput = lib_core/* getInput */.V4('json-output').trim() || undefined;
             const packResult = await (0,bundler/* runPackStep */.D5)(resolvedDir, {
                 target,
                 archive,
                 format: bundleFormat,
+                marketplace,
+                marketplacePath,
+                offline,
+                includePrerelease,
+                jsonOutput,
             });
-            lib_core/* setOutput */.uH('bundle-path', packResult.bundlePath);
+            // Empty string when no bundle was produced -- preserves the
+            // previous output contract for marketplace-only projects.
+            lib_core/* setOutput */.uH('bundle-path', packResult.bundlePath ?? '');
             lib_core/* setOutput */.uH('bundle-format', packResult.format);
+            lib_core/* setOutput */.uH('pack-json', packResult.marketplaceJsonPath ?? '');
         }
         else {
             // bundle-format only makes sense with pack: true. Surface the misuse
@@ -41959,6 +42074,23 @@ async function run() {
             if (fmtRaw) {
                 throw new Error(`bundle-format='${fmtRaw}' was set but pack is not enabled. `
                     + `Set pack: true to produce a bundle, or remove bundle-format.`);
+            }
+            // The marketplace pass-through inputs only make sense with pack: true.
+            // Reject the misuse rather than silently ignoring it.
+            const marketplaceMisuse = [];
+            if (lib_core/* getInput */.V4('marketplace').trim())
+                marketplaceMisuse.push('marketplace');
+            if (lib_core/* getInput */.V4('marketplace-path').trim())
+                marketplaceMisuse.push('marketplace-path');
+            if (lib_core/* getInput */.V4('json-output').trim())
+                marketplaceMisuse.push('json-output');
+            if (lib_core/* getInput */.V4('offline') === 'true')
+                marketplaceMisuse.push('offline');
+            if (lib_core/* getInput */.V4('include-prerelease') === 'true')
+                marketplaceMisuse.push('include-prerelease');
+            if (marketplaceMisuse.length > 0) {
+                throw new Error(`${marketplaceMisuse.join(', ')} was set but pack is not enabled. `
+                    + `Set pack: true to forward these inputs to apm pack, or remove them.`);
             }
         }
         lib_core/* setOutput */.uH('success', 'true');

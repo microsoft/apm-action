@@ -27,6 +27,36 @@ function resolveBundleFormat(): BundleFormat {
 }
 
 /**
+ * Parse the `marketplace-path` input into a list of `FORMAT=PATH`
+ * overrides suitable for forwarding as repeated `--marketplace-path`
+ * arguments. Accepts:
+ *   - newline-separated entries (one override per line)
+ *   - comma-separated entries (one override per item)
+ *   - a single entry on one line
+ *
+ * Empty/blank lines are stripped. Lines that do not match `FORMAT=PATH`
+ * are surfaced as errors -- silently dropping them turns into a debugging
+ * trap when CI emits the "wrong" file.
+ */
+function parseMarketplacePath(raw: string): string[] {
+  const trimmed = raw.trim();
+  if (!trimmed) return [];
+  const items = trimmed
+    .split(/[\n,]/)
+    .map(s => s.trim())
+    .filter(s => s.length > 0);
+  for (const item of items) {
+    if (!/^[A-Za-z0-9_-]+=.+$/.test(item)) {
+      throw new Error(
+        `marketplace-path entries must be in 'FORMAT=PATH' shape (got: '${item}'). `
+        + `Provide one override per line or comma-separate them.`,
+      );
+    }
+  }
+  return items;
+}
+
+/**
  * Run the APM action: install agent primitives.
  *
  * Default behavior (no inputs): reads apm.yml, runs apm install. Done.
@@ -100,6 +130,11 @@ export async function run(): Promise<void> {
       // already covers it; flagging archive separately surprises users
       // whose composite-action templates emit `archive: 'true'` by default.
       if (core.getInput('bundle-format').trim()) conflicts.push('bundle-format');
+      if (core.getInput('marketplace').trim()) conflicts.push('marketplace');
+      if (core.getInput('marketplace-path').trim()) conflicts.push('marketplace-path');
+      if (core.getInput('json-output').trim()) conflicts.push('json-output');
+      if (core.getInput('offline') === 'true') conflicts.push('offline');
+      if (core.getInput('include-prerelease') === 'true') conflicts.push('include-prerelease');
       if (conflicts.length > 0) {
         throw new Error(
           `'setup-only' is mutually exclusive with: ${conflicts.join(', ')}. `
@@ -350,13 +385,26 @@ export async function run(): Promise<void> {
       const target = core.getInput('target').trim() || undefined;
       const archive = core.getInput('archive') !== 'false';
       const bundleFormat = resolveBundleFormat();
+      const marketplace = core.getInput('marketplace').trim() || undefined;
+      const marketplacePath = parseMarketplacePath(core.getInput('marketplace-path'));
+      const offline = core.getInput('offline') === 'true';
+      const includePrerelease = core.getInput('include-prerelease') === 'true';
+      const jsonOutput = core.getInput('json-output').trim() || undefined;
       const packResult = await runPackStep(resolvedDir, {
         target,
         archive,
         format: bundleFormat,
+        marketplace,
+        marketplacePath,
+        offline,
+        includePrerelease,
+        jsonOutput,
       });
-      core.setOutput('bundle-path', packResult.bundlePath);
+      // Empty string when no bundle was produced -- preserves the
+      // previous output contract for marketplace-only projects.
+      core.setOutput('bundle-path', packResult.bundlePath ?? '');
       core.setOutput('bundle-format', packResult.format);
+      core.setOutput('pack-json', packResult.marketplaceJsonPath ?? '');
     } else {
       // bundle-format only makes sense with pack: true. Surface the misuse
       // explicitly rather than silently ignoring the input.
@@ -365,6 +413,20 @@ export async function run(): Promise<void> {
         throw new Error(
           `bundle-format='${fmtRaw}' was set but pack is not enabled. `
           + `Set pack: true to produce a bundle, or remove bundle-format.`,
+        );
+      }
+      // The marketplace pass-through inputs only make sense with pack: true.
+      // Reject the misuse rather than silently ignoring it.
+      const marketplaceMisuse: string[] = [];
+      if (core.getInput('marketplace').trim()) marketplaceMisuse.push('marketplace');
+      if (core.getInput('marketplace-path').trim()) marketplaceMisuse.push('marketplace-path');
+      if (core.getInput('json-output').trim()) marketplaceMisuse.push('json-output');
+      if (core.getInput('offline') === 'true') marketplaceMisuse.push('offline');
+      if (core.getInput('include-prerelease') === 'true') marketplaceMisuse.push('include-prerelease');
+      if (marketplaceMisuse.length > 0) {
+        throw new Error(
+          `${marketplaceMisuse.join(', ')} was set but pack is not enabled. `
+          + `Set pack: true to forward these inputs to apm pack, or remove them.`,
         );
       }
     }
