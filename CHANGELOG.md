@@ -10,6 +10,8 @@ The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-05-18
+
 ### Added
 
 - **Pack pass-through inputs for marketplace publishing** ([microsoft/apm#1348]). New inputs forward APM CLI flags that previously had no surface in the action:
@@ -210,7 +212,12 @@ Initial public release.
 - **Marketplace name set to "Setup APM"** ([#5]).
 - **Microsoft OSS compliance baseline.** SECURITY.md ([#2]), CODEOWNERS, license, contributing guide, code of conduct, and CI pipeline.
 
-[Unreleased]: https://github.com/microsoft/apm-action/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/microsoft/apm-action/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/microsoft/apm-action/compare/v1.7.3...v1.8.0
+[1.7.3]: https://github.com/microsoft/apm-action/compare/v1.7.2...v1.7.3
+[1.7.2]: https://github.com/microsoft/apm-action/compare/v1.7.1...v1.7.2
+[1.7.1]: https://github.com/microsoft/apm-action/compare/v1.7.0...v1.7.1
+[1.7.0]: https://github.com/microsoft/apm-action/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/microsoft/apm-action/compare/v1.5.1...v1.6.0
 [1.5.1]: https://github.com/microsoft/apm-action/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/microsoft/apm-action/compare/v1.4.2...v1.5.0
