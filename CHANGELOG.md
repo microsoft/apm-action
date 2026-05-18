@@ -228,7 +228,8 @@ Initial public release.
 - **Marketplace name set to "Setup APM"** ([#5]).
 - **Microsoft OSS compliance baseline.** SECURITY.md ([#2]), CODEOWNERS, license, contributing guide, code of conduct, and CI pipeline.
 
-[Unreleased]: https://github.com/microsoft/apm-action/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/microsoft/apm-action/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/microsoft/apm-action/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/microsoft/apm-action/compare/v1.7.3...v1.8.0
 [1.7.3]: https://github.com/microsoft/apm-action/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/microsoft/apm-action/compare/v1.7.1...v1.7.2
