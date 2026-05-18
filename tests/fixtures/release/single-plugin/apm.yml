@@ -1,0 +1,6 @@
+name: solo-demo
+version: 1.0.0
+description: Single-plugin fixture for mode-release e2e
+
+dependencies:
+  apm: []

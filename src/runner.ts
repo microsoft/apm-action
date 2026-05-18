@@ -5,6 +5,18 @@ import * as path from 'path';
 import * as yaml from 'js-yaml';
 import { ensureApmInstalled } from './installer.js';
 import { resolveLocalBundle, extractBundle, runPackStep, BundleFormat } from './bundler.js';
+import { runReleaseMode } from './release.js';
+
+/**
+ * Supported values for the `mode` input. `mode` is the high-level
+ * orchestration switch -- when set, it supersedes individual booleans
+ * (pack/bundle/etc.) and runs a fixed, opinionated pipeline.
+ *
+ * Today only 'release' is supported. Future modes (`audit`, `validate`)
+ * compose naturally without growing the boolean input matrix.
+ */
+const VALID_MODES = ['release'] as const;
+type Mode = typeof VALID_MODES[number];
 
 /**
  * Allowed values for the `bundle-format` input.
@@ -86,6 +98,91 @@ export async function run(): Promise<void> {
     const packInput = core.getInput('pack') === 'true';
     const isolated = core.getInput('isolated') === 'true';
 
+    // MODE DISPATCH (umbrella orchestration). When `mode` is set, it
+    // supersedes pack/bundle/setup-only/etc. -- the mode runs its own
+    // fixed pipeline. Mutual-exclusion guard runs first so a misconfigured
+    // workflow fails before any side effects (install, mkdir, etc.).
+    const modeInput = core.getInput('mode').trim().toLowerCase();
+    if (modeInput) {
+      if (!VALID_MODES.includes(modeInput as Mode)) {
+        throw new Error(
+          `mode must be one of: ${VALID_MODES.join(', ')} (got: '${modeInput}'). `
+          + `Leave 'mode' empty to use the classic per-flag dispatch.`,
+        );
+      }
+      const modeConflicts: string[] = [];
+      if (packInput) modeConflicts.push('pack');
+      if (bundleInput) modeConflicts.push('bundle');
+      if (bundlesFileInput) modeConflicts.push('bundles-file');
+      if (core.getInput('setup-only') === 'true') modeConflicts.push('setup-only');
+      if (modeConflicts.length > 0) {
+        throw new Error(
+          `mode='${modeInput}' is mutually exclusive with: ${modeConflicts.join(', ')}. `
+          + `mode runs a fixed pipeline; remove the conflicting flag(s) or unset mode.`,
+        );
+      }
+
+      // Pass github-token (same precedence rules as below, replicated here so
+      // mode dispatch is self-contained and can short-circuit before the
+      // classic install flow.)
+      const ghToken = core.getInput('github-token');
+      if (ghToken) {
+        core.setSecret(ghToken);
+        if (!process.env.GITHUB_TOKEN) process.env.GITHUB_TOKEN = ghToken;
+        if (!process.env.GITHUB_APM_PAT) process.env.GITHUB_APM_PAT = ghToken;
+      }
+
+      fs.mkdirSync(resolvedDir, { recursive: true });
+      // Mode pipelines require the APM CLI; install + record the resolved
+      // version so downstream debugging is straightforward.
+      const installResult = await ensureApmInstalled();
+      core.setOutput('apm-version', installResult.resolvedVersion);
+      core.setOutput('apm-path', installResult.binaryPath);
+
+      if (modeInput === 'release') {
+        const releasePrerelease = (core.getInput('release-prerelease').trim() || 'auto').toLowerCase();
+        if (!['true', 'false', 'auto'].includes(releasePrerelease)) {
+          throw new Error(
+            `release-prerelease must be one of: true, false, auto (got: '${releasePrerelease}')`,
+          );
+        }
+        const result = await runReleaseMode({
+          workingDir: resolvedDir,
+          releaseTag: (() => {
+            const inputTag = core.getInput('release-tag');
+            const envRef = process.env.GITHUB_REF_NAME;
+            // resolveReleaseTag lives in release.ts but throwing early
+            // here keeps the action-surface error message close to the
+            // input definition.
+            const fromInput = inputTag.trim();
+            if (fromInput) return fromInput;
+            const fromEnv = (envRef ?? '').trim();
+            if (fromEnv) return fromEnv;
+            throw new Error(
+              `Cannot resolve release-tag: input is empty and `
+              + `GITHUB_REF_NAME is unset. Pass release-tag explicitly or `
+              + `trigger the workflow on a tag push (on.push.tags).`,
+            );
+          })(),
+          releaseName: core.getInput('release-name'),
+          releaseNotes: core.getInput('release-notes'),
+          releaseDraft: core.getInput('release-draft') === 'true',
+          releasePrerelease: releasePrerelease as 'true' | 'false' | 'auto',
+          skipPublish: core.getInput('release-skip-publish') === 'true',
+        });
+
+        core.setOutput('packages', JSON.stringify(result.packages));
+        core.setOutput('marketplace-drift', result.marketplaceDrift ? 'true' : 'false');
+        core.setOutput('release-url', result.releaseUrl);
+        core.setOutput('release-tag', result.releaseTag);
+        core.setOutput('success', 'true');
+        core.info(`APM action completed successfully (mode: release)`);
+        return;
+      }
+      // Unreachable today; here for the next mode added.
+      throw new Error(`mode='${modeInput}' has no dispatch implementation`);
+    }
+
     // Validate `target` once, up front. The value flows into either the
     // generated apm.yml (isolated mode) or `apm pack --target` (pack
     // mode), both of which are unsafe with raw input. Failing here -- before
@@ -151,6 +248,7 @@ export async function run(): Promise<void> {
       if (core.getInput('json-output').trim()) conflicts.push('json-output');
       if (core.getInput('offline') === 'true') conflicts.push('offline');
       if (core.getInput('include-prerelease') === 'true') conflicts.push('include-prerelease');
+      if (core.getInput('mode').trim()) conflicts.push('mode');
       if (conflicts.length > 0) {
         throw new Error(
           `'setup-only' is mutually exclusive with: ${conflicts.join(', ')}. `

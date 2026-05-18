@@ -126,6 +126,46 @@ When `apm.yml` declares an `outputs:` map (vendor-format marketplace files), for
 
 **Vendor-neutral by design.** This action does not assume which downstream CLI consumes the marketplace files. It produces the artifacts your `apm.yml` `outputs:` map declares; how consumers install them is a separate concern. See the `apm marketplace init` scaffold for guidance on which formats to declare for which consumer ecosystems.
 
+<a id="release-mode"></a>
+### Release mode (one-step tag publish)
+
+Collapse the canonical release pipeline -- gate, matrix-pack, sha256 sidecars, marketplace.json drift detection, `gh release create` -- into a single step. Triggered by tag pushes; vendor-neutral underneath (the CLI primitives work identically in GitLab CI, Jenkins, ADO).
+
+```yaml
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/apm-action@v1
+        with:
+          mode: release
+          # release-tag defaults to GITHUB_REF_NAME
+          # release-prerelease: auto  (detects -rc/-alpha/-beta/-pre suffix)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+What it does, in order:
+
+1. `apm pack --check-versions --check-clean --json` -- fails the job on misaligned per-package versions or uncommitted marketplace.json drift.
+2. Detect repo shape (`aggregator` if `plugins/<name>/apm.yml` files exist, otherwise `single-plugin`).
+3. Matrix-pack every package with `apm pack --offline --archive` -> tarballs in `dist/`.
+4. Write `<tarball>.sha256` sidecars next to each tarball.
+5. Stage `marketplace-<version>.json` for aggregator shapes.
+6. Render a GitHub Step Summary table of the release contents.
+7. `gh release create <tag> <files...>` (skipped if `release-skip-publish: true`).
+
+Outputs: `packages` (JSON), `marketplace-drift`, `release-url`, `release-tag`.
+
+For the non-GitHub-Actions equivalent (the same primitives wrapped in `.gitlab-ci.yml`, `Jenkinsfile`, ADO `azure-pipelines.yml`), see [`producer/releasing-from-any-ci.md`](https://microsoft.github.io/apm/producer/releasing-from-any-ci/).
+
 ### Restore mode (verified extraction)
 
 Restore primitives from a bundle. The action installs APM (cached across runs) and uses `apm unpack` for integrity verification — no Python, minimal network. Only files listed in the bundle's lockfile (`deployed_files`) are written to `working-directory`; the lockfile and `apm.yml` themselves are not, so the workspace stays clean for downstream steps such as `git checkout`.

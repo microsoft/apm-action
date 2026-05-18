@@ -10,6 +10,16 @@ The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 
 ## [Unreleased]
 
+### Added
+
+- **`mode: release` umbrella for tag-triggered releases** ([microsoft/apm#1348]). A single input collapses the release pipeline into one step: gate (`apm pack --check-versions --check-clean --json`), per-package matrix pack with sha256 sidecars, marketplace.json drift detection, GH Step Summary, and `gh release create` publish. The CLI primitives underneath stay vendor-neutral — the equivalent shell recipe works unchanged on GitLab CI, Jenkins, and Azure DevOps (see `producer/releasing-from-any-ci.md`).
+  - New inputs (all optional): `mode` (`release`), `release-tag`, `release-name`, `release-notes`, `release-draft`, `release-prerelease` (`true`/`false`/`auto` — auto-detects from `-rc`/`-alpha`/`-beta`/`-pre` in the tag), `release-skip-publish` (dry-run for CI / e2e).
+  - New outputs: `packages` (JSON array of `{name, version, sha256, path}`), `marketplace-drift` (`true`/`false`), `release-url`, `release-tag`.
+  - Mutually exclusive with the classic dispatch inputs (`pack`, `bundle`, `bundles-file`, `setup-only`); setting any combination fails fast with a single consolidated error.
+  - Requires `apm` >= 0.14.0 on PATH for the `--check-versions` / `--check-clean` gate; below 0.14 the gate exits non-zero with a generic message.
+  - Reference workflow: `tests/fixtures/release/` (aggregator + single-plugin shapes).
+
+
 ## [1.8.0] - 2026-05-18
 
 ### Added

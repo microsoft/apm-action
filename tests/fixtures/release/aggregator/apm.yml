@@ -1,0 +1,14 @@
+name: aggregator-demo
+version: 1.0.0
+description: Aggregator fixture for mode-release e2e
+
+marketplace:
+  owner:
+    name: apm-action-tests
+  packages:
+    - name: alpha
+      description: Alpha plugin
+      source: ./plugins/alpha
+    - name: beta
+      description: Beta plugin
+      source: ./plugins/beta

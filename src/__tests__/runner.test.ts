@@ -62,6 +62,16 @@ jest.unstable_mockModule('../bundler.js', () => ({
   detectBundleFormat: mockDetectBundleFormat,
 }));
 
+const mockRunReleaseMode = jest.fn<(opts: unknown) => Promise<{
+  packages: Array<{ name: string; version: string; bundle: string; sha256: string; sha256_path: string }>;
+  marketplaceDrift: boolean;
+  releaseUrl: string;
+  releaseTag: string;
+}>>();
+jest.unstable_mockModule('../release.js', () => ({
+  runReleaseMode: mockRunReleaseMode,
+}));
+
 const { clearPrimitives, run } = await import('../runner.js');
 
 describe('clearPrimitives', () => {
@@ -1478,3 +1488,132 @@ describe('pack pass-through inputs (marketplace, json, offline, prerelease)', ()
   });
 });
 
+
+describe('run() -- mode: release dispatch', () => {
+  let tmpDir: string;
+  let prevWorkspace: string | undefined;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-mode-release-'));
+    prevWorkspace = process.env.GITHUB_WORKSPACE;
+    process.env.GITHUB_WORKSPACE = tmpDir;
+    mockEnsureApmInstalled.mockResolvedValue({
+      resolvedVersion: '0.14.0',
+      toolDir: '/tmp/apm-tool',
+      binaryPath: '/tmp/apm-tool/apm',
+    });
+  });
+
+  afterEach(() => {
+    if (prevWorkspace === undefined) {
+      delete process.env.GITHUB_WORKSPACE;
+    } else {
+      process.env.GITHUB_WORKSPACE = prevWorkspace;
+    }
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function inputMap(map: Record<string, string>): (name: unknown, ...args: unknown[]) => string {
+    return (name: unknown) => map[name as string] ?? '';
+  }
+
+  it('dispatches to runReleaseMode and propagates outputs', async () => {
+    mockGetInput.mockImplementation(inputMap({
+      'mode': 'release',
+      'working-directory': tmpDir,
+      'release-tag': 'v1.2.3',
+      'release-prerelease': 'auto',
+      'release-skip-publish': 'true',
+    }));
+    mockRunReleaseMode.mockResolvedValueOnce({
+      packages: [{ name: 'p', version: '1.0.0', bundle: '/x.tgz', sha256: 'aa', sha256_path: '/x.tgz.sha256' }],
+      marketplaceDrift: false,
+      releaseUrl: '',
+      releaseTag: 'v1.2.3',
+    });
+
+    await run();
+
+    expect(mockRunReleaseMode).toHaveBeenCalledTimes(1);
+    const opts = mockRunReleaseMode.mock.calls[0][0] as { releaseTag: string; skipPublish: boolean };
+    expect(opts.releaseTag).toBe('v1.2.3');
+    expect(opts.skipPublish).toBe(true);
+    expect(mockSetOutput).toHaveBeenCalledWith('release-tag', 'v1.2.3');
+    expect(mockSetOutput).toHaveBeenCalledWith('marketplace-drift', 'false');
+    expect(mockSetOutput).toHaveBeenCalledWith('packages', expect.stringContaining('"name":"p"'));
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    // bundler.runPackStep and others must NOT be called when mode handles dispatch
+    expect(mockRunPackStep).not.toHaveBeenCalled();
+  });
+
+  it('rejects unknown mode', async () => {
+    mockGetInput.mockImplementation(inputMap({ 'mode': 'audit' }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(expect.stringContaining('mode must be one of'));
+    expect(mockRunReleaseMode).not.toHaveBeenCalled();
+  });
+
+  it('rejects mode + pack combination', async () => {
+    mockGetInput.mockImplementation(inputMap({ 'mode': 'release', 'pack': 'true' }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(expect.stringContaining('mutually exclusive'));
+    expect(mockRunReleaseMode).not.toHaveBeenCalled();
+  });
+
+  it('rejects mode + bundle combination', async () => {
+    mockGetInput.mockImplementation(inputMap({ 'mode': 'release', 'bundle': './x.tgz' }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(expect.stringContaining('mutually exclusive'));
+  });
+
+  it('rejects mode + setup-only combination', async () => {
+    mockGetInput.mockImplementation(inputMap({ 'mode': 'release', 'setup-only': 'true' }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(expect.stringContaining('mutually exclusive'));
+  });
+
+  it('rejects invalid release-prerelease', async () => {
+    mockGetInput.mockImplementation(inputMap({
+      'mode': 'release',
+      'working-directory': tmpDir,
+      'release-tag': 'v1.0.0',
+      'release-prerelease': 'maybe',
+    }));
+    await run();
+    expect(mockSetFailed).toHaveBeenCalledWith(expect.stringContaining('release-prerelease must be one of'));
+  });
+
+  it('resolves release-tag from GITHUB_REF_NAME when input omitted', async () => {
+    const prevRef = process.env.GITHUB_REF_NAME;
+    process.env.GITHUB_REF_NAME = 'v9.9.9';
+    try {
+      mockGetInput.mockImplementation(inputMap({
+        'mode': 'release',
+        'working-directory': tmpDir,
+        'release-skip-publish': 'true',
+      }));
+      mockRunReleaseMode.mockResolvedValueOnce({
+        packages: [], marketplaceDrift: false, releaseUrl: '', releaseTag: 'v9.9.9',
+      });
+      await run();
+      const opts = mockRunReleaseMode.mock.calls[0][0] as { releaseTag: string };
+      expect(opts.releaseTag).toBe('v9.9.9');
+    } finally {
+      if (prevRef === undefined) delete process.env.GITHUB_REF_NAME;
+      else process.env.GITHUB_REF_NAME = prevRef;
+    }
+  });
+
+  it('fails clearly when neither release-tag nor GITHUB_REF_NAME present', async () => {
+    const prevRef = process.env.GITHUB_REF_NAME;
+    delete process.env.GITHUB_REF_NAME;
+    try {
+      mockGetInput.mockImplementation(inputMap({ 'mode': 'release', 'working-directory': tmpDir }));
+      await run();
+      expect(mockSetFailed).toHaveBeenCalledWith(expect.stringContaining('release-tag'));
+    } finally {
+      if (prevRef !== undefined) process.env.GITHUB_REF_NAME = prevRef;
+    }
+  });
+});

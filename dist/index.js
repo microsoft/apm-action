@@ -41719,6 +41719,435 @@ async function ensureApmInstalled() {
 
 // EXTERNAL MODULE: ./src/bundler.ts + 10 modules
 var bundler = __nccwpck_require__(2744);
+// EXTERNAL MODULE: external "node:crypto"
+var external_node_crypto_ = __nccwpck_require__(7598);
+;// CONCATENATED MODULE: external "node:fs"
+const external_node_fs_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:fs");
+;// CONCATENATED MODULE: external "node:path"
+const external_node_path_namespaceObject = __WEBPACK_EXTERNAL_createRequire(import.meta.url)("node:path");
+;// CONCATENATED MODULE: ./src/release.ts
+
+
+
+
+
+
+/**
+ * Resolve the release tag. Explicit input wins; otherwise fall back to
+ * GITHUB_REF_NAME (set automatically when triggered by a tag push).
+ */
+function resolveReleaseTag(inputTag, envRefName) {
+    const fromInput = inputTag.trim();
+    if (fromInput)
+        return fromInput;
+    const fromEnv = (envRefName ?? '').trim();
+    if (fromEnv)
+        return fromEnv;
+    throw new Error(`Cannot resolve release tag: 'release-tag' input is empty and `
+        + `GITHUB_REF_NAME is not set. Pass release-tag explicitly or trigger `
+        + `the workflow on a tag push (on.push.tags).`);
+}
+/**
+ * Detect repository shape from the on-disk apm.yml layout.
+ *
+ *   aggregator    -- top-level apm.yml + plugins subdir siblings.
+ *                    Each plugin under plugins/ is packed independently.
+ *   single-plugin -- top-level apm.yml only.
+ *
+ * Heuristic: presence of one or more `plugins/<name>/apm.yml` files implies
+ * aggregator. This matches the zava-agent-configs layout and the convention
+ * used in microsoft/apm docs (producer/repo-shapes.md).
+ */
+function detectShape(workingDir) {
+    const pluginsDir = external_node_path_namespaceObject.join(workingDir, 'plugins');
+    if (!external_node_fs_namespaceObject.existsSync(pluginsDir) || !external_node_fs_namespaceObject.statSync(pluginsDir).isDirectory()) {
+        return 'single-plugin';
+    }
+    const entries = external_node_fs_namespaceObject.readdirSync(pluginsDir, { withFileTypes: true });
+    for (const entry of entries) {
+        if (!entry.isDirectory())
+            continue;
+        const pluginYml = external_node_path_namespaceObject.join(pluginsDir, entry.name, 'apm.yml');
+        if (external_node_fs_namespaceObject.existsSync(pluginYml)) {
+            return 'aggregator';
+        }
+    }
+    return 'single-plugin';
+}
+/**
+ * Read `name` and `version` from an apm.yml without imposing a schema --
+ * just enough to drive matrix iteration and artifact naming.
+ */
+function readApmYml(apmYmlPath) {
+    if (!external_node_fs_namespaceObject.existsSync(apmYmlPath)) {
+        throw new Error(`apm.yml not found at ${apmYmlPath}`);
+    }
+    const raw = external_node_fs_namespaceObject.readFileSync(apmYmlPath, 'utf8');
+    const parsed = load(raw);
+    if (!parsed || typeof parsed !== 'object') {
+        throw new Error(`apm.yml at ${apmYmlPath} is empty or not an object`);
+    }
+    const name = String(parsed.name ?? '').trim();
+    const version = String(parsed.version ?? '').trim();
+    if (!name) {
+        throw new Error(`apm.yml at ${apmYmlPath} is missing 'name'`);
+    }
+    if (!version) {
+        throw new Error(`apm.yml at ${apmYmlPath} is missing 'version'`);
+    }
+    return { name, version };
+}
+/**
+ * Discover the packages to release.
+ *   aggregator    -> one entry per plugin under plugins/.
+ *   single-plugin -> one entry for the top-level apm.yml.
+ */
+function discoverPackages(workingDir, shape) {
+    if (shape === 'single-plugin') {
+        const meta = readApmYml(external_node_path_namespaceObject.join(workingDir, 'apm.yml'));
+        return [{ ...meta, dir: workingDir }];
+    }
+    const pluginsDir = external_node_path_namespaceObject.join(workingDir, 'plugins');
+    const out = [];
+    for (const entry of external_node_fs_namespaceObject.readdirSync(pluginsDir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+        if (!entry.isDirectory())
+            continue;
+        const dir = external_node_path_namespaceObject.join(pluginsDir, entry.name);
+        const apmYml = external_node_path_namespaceObject.join(dir, 'apm.yml');
+        if (!external_node_fs_namespaceObject.existsSync(apmYml))
+            continue;
+        const meta = readApmYml(apmYml);
+        out.push({ ...meta, dir });
+    }
+    if (out.length === 0) {
+        throw new Error(`No packages found under ${pluginsDir}. Expected one or more `
+            + `plugins/<name>/apm.yml files (aggregator layout).`);
+    }
+    return out;
+}
+/**
+ * Decide prerelease=true|false. `auto` -> true when the tag contains `-`
+ * (semver pre-release suffix), false otherwise. This matches `gh release
+ * create --prerelease` semantics in the most common workflow shape.
+ */
+function resolvePrerelease(mode, tag) {
+    if (mode === 'true')
+        return true;
+    if (mode === 'false')
+        return false;
+    // auto: a hyphen after the version (e.g. v1.2.3-rc.1) -> prerelease.
+    // Strip a leading v/V to keep things obvious for the operator who
+    // reads the trace.
+    const stripped = tag.replace(/^v/i, '');
+    const m = stripped.match(/^[0-9]+\.[0-9]+\.[0-9]+(.*)$/);
+    if (!m)
+        return false;
+    return m[1].startsWith('-');
+}
+/**
+ * Run the validation gate: `apm pack --check-versions --check-clean --json`.
+ * Surfaces version misalignment (exit 3) and marketplace drift (exit 4)
+ * as actionable failures with the JSON envelope rendered into the step
+ * summary.
+ *
+ * Returns the parsed envelope so callers can branch on `drift` if needed.
+ */
+async function runGate(workingDir) {
+    const tmpJson = external_node_path_namespaceObject.join(workingDir, '.apm-pack-report.json');
+    // Always start clean so a stale report from a previous run never lies.
+    try {
+        external_node_fs_namespaceObject.unlinkSync(tmpJson);
+    }
+    catch { /* ignore */ }
+    const args = [
+        'pack',
+        '--check-versions',
+        '--check-clean',
+        '--json',
+    ];
+    lib_core/* info */.pq(`Running gate: apm ${args.join(' ')}`);
+    let stdoutBuf = '';
+    let stderrBuf = '';
+    const rc = await lib_exec/* exec */.m('apm', args, {
+        cwd: workingDir,
+        ignoreReturnCode: true,
+        silent: true,
+        listeners: {
+            stdout: (data) => { stdoutBuf += data.toString('utf8'); },
+            stderr: (data) => { stderrBuf += data.toString('utf8'); process.stderr.write(data); },
+        },
+    });
+    // Persist for diagnostics + downstream steps.
+    if (stdoutBuf) {
+        try {
+            external_node_fs_namespaceObject.writeFileSync(tmpJson, stdoutBuf);
+        }
+        catch { /* ignore */ }
+    }
+    let envelope = null;
+    try {
+        envelope = stdoutBuf ? JSON.parse(stdoutBuf) : null;
+    }
+    catch {
+        envelope = null;
+    }
+    if (rc === 0) {
+        return { drift: false, envelope };
+    }
+    // Exit code semantics from apm pack (Wave 4):
+    //   3 = version misalignment (--check-versions failed)
+    //   4 = drift (--check-clean failed)
+    // Anything else = generic pack failure.
+    if (rc === 3) {
+        throw new Error(`apm pack --check-versions detected misaligned versions. `
+            + `Reconcile your apm.yml(s) and tag_pattern before releasing. `
+            + `See the JSON envelope above (or .apm-pack-report.json) for the `
+            + `specific mismatch.`);
+    }
+    if (rc === 4) {
+        // Caller still needs to know about drift even on failure, so the
+        // output gets set before throwing.
+        lib_core/* setOutput */.uH('marketplace-drift', 'true');
+        throw new Error(`apm pack --check-clean detected uncommitted marketplace drift. `
+            + `Re-run 'apm pack' locally and commit the regenerated marketplace `
+            + `files before releasing. See the JSON envelope (or `
+            + `.apm-pack-report.json) for the diff.`);
+    }
+    throw new Error(`apm pack gate failed with exit code ${rc}. stderr:\n${stderrBuf}`);
+}
+/**
+ * Pack a single package: `cd <dir> && apm pack --offline --archive -o <dist>`.
+ * Returns the absolute path to the produced .tar.gz.
+ */
+async function packPackage(dir, distDir) {
+    external_node_fs_namespaceObject.mkdirSync(distDir, { recursive: true });
+    const before = listTarballs(distDir);
+    const rc = await lib_exec/* exec */.m('apm', [
+        'pack',
+        '--offline',
+        '--archive',
+        '-o', distDir,
+    ], { cwd: dir, ignoreReturnCode: true });
+    if (rc !== 0) {
+        throw new Error(`apm pack failed for ${dir} (exit ${rc})`);
+    }
+    const after = listTarballs(distDir);
+    const fresh = after.filter(p => !before.includes(p));
+    if (fresh.length === 0) {
+        throw new Error(`apm pack in ${dir} succeeded but produced no .tar.gz in ${distDir}. `
+            + `Verify that the package has a 'dependencies:' block or primitives `
+            + `to bundle.`);
+    }
+    if (fresh.length > 1) {
+        lib_core/* warning */.$e(`apm pack in ${dir} produced ${fresh.length} tarballs; expected 1. `
+            + `Using the most recently modified: ${fresh[0]}`);
+    }
+    return fresh[0];
+}
+function listTarballs(dir) {
+    if (!external_node_fs_namespaceObject.existsSync(dir))
+        return [];
+    return external_node_fs_namespaceObject.readdirSync(dir)
+        .filter(n => n.endsWith('.tar.gz'))
+        .map(n => external_node_path_namespaceObject.join(dir, n))
+        .sort((a, b) => external_node_fs_namespaceObject.statSync(b).mtimeMs - external_node_fs_namespaceObject.statSync(a).mtimeMs);
+}
+/**
+ * Compute sha256 of a file and write a sidecar in `sha256sum`-compatible
+ * format ('<hex>  <basename>\n'), returning the sidecar path and hex digest.
+ */
+function writeSha256Sidecar(filePath) {
+    const buf = external_node_fs_namespaceObject.readFileSync(filePath);
+    const hex = external_node_crypto_.createHash('sha256').update(buf).digest('hex');
+    const sidecar = filePath + '.sha256';
+    // sha256sum format: '<hex>  <basename>\n' (two spaces between fields).
+    external_node_fs_namespaceObject.writeFileSync(sidecar, `${hex}  ${external_node_path_namespaceObject.basename(filePath)}\n`);
+    return { hex, sidecar };
+}
+/**
+ * Locate the canonical marketplace.json for aggregator shape and stage
+ * it into dist with a version suffix. Returns the staged path, or null
+ * when no marketplace file exists (single-plugin shape typically).
+ *
+ * Lookup order (first match wins):
+ *   1. .claude-plugin/marketplace.json
+ *   2. .codex-plugin/marketplace.json
+ *   3. marketplace.json (top level)
+ */
+function stageMarketplaceJson(workingDir, distDir, version) {
+    const candidates = [
+        external_node_path_namespaceObject.join(workingDir, '.claude-plugin', 'marketplace.json'),
+        external_node_path_namespaceObject.join(workingDir, '.codex-plugin', 'marketplace.json'),
+        external_node_path_namespaceObject.join(workingDir, 'marketplace.json'),
+    ];
+    for (const src of candidates) {
+        if (!external_node_fs_namespaceObject.existsSync(src))
+            continue;
+        external_node_fs_namespaceObject.mkdirSync(distDir, { recursive: true });
+        const dst = external_node_path_namespaceObject.join(distDir, `marketplace-${version}.json`);
+        external_node_fs_namespaceObject.copyFileSync(src, dst);
+        lib_core/* info */.pq(`Staged ${src} -> ${dst}`);
+        return dst;
+    }
+    return null;
+}
+function renderStepSummary(shape, tag, packages, marketplacePath, skipPublish) {
+    const rows = packages.map(p => `| \`${p.name}\` | \`${p.version}\` | \`${external_node_path_namespaceObject.basename(p.bundle)}\` | \`${p.sha256.slice(0, 12)}...\` |`).join('\n');
+    const marketplaceLine = marketplacePath
+        ? `**Marketplace asset:** \`${external_node_path_namespaceObject.basename(marketplacePath)}\``
+        : `**Marketplace asset:** (none -- single-plugin shape)`;
+    const publishLine = skipPublish
+        ? `**Publish:** skipped (release-skip-publish=true)`
+        : `**Publish:** gh release create ${tag}`;
+    return [
+        `## APM release \`${tag}\``,
+        ``,
+        `**Shape:** ${shape}  *  **Packages:** ${packages.length}`,
+        ``,
+        marketplaceLine,
+        ``,
+        publishLine,
+        ``,
+        `| package | version | bundle | sha256 |`,
+        `|---|---|---|---|`,
+        rows,
+        ``,
+    ].join('\n');
+}
+/**
+ * Generate a default release body when the caller did not provide one.
+ */
+function renderDefaultReleaseNotes(packages, marketplacePath) {
+    const rows = packages.map(p => `| \`${p.name}\` | \`${p.version}\` | \`${external_node_path_namespaceObject.basename(p.bundle)}\` | \`${p.sha256}\` |`).join('\n');
+    const marketplaceLine = marketplacePath
+        ? `\nMarketplace manifest: \`${external_node_path_namespaceObject.basename(marketplacePath)}\`\n`
+        : ``;
+    return [
+        `## Packages`,
+        ``,
+        `| package | version | bundle | sha256 |`,
+        `|---|---|---|---|`,
+        rows,
+        marketplaceLine,
+        `Verify any download with \`sha256sum -c <bundle>.sha256\`.`,
+    ].join('\n');
+}
+/**
+ * Execute the release pipeline. See ReleaseOptions for parameters.
+ */
+async function runReleaseMode(opts) {
+    const workingDir = external_node_path_namespaceObject.resolve(opts.workingDir);
+    if (!external_node_fs_namespaceObject.existsSync(workingDir)) {
+        throw new Error(`Working directory does not exist: ${workingDir}`);
+    }
+    // dist/ lives under GITHUB_WORKSPACE when available, else under workingDir.
+    // Putting it under WORKSPACE matches the zava convention and ensures the
+    // file paths in outputs.packages are stable across reusable workflows.
+    const workspace = process.env.GITHUB_WORKSPACE
+        ? external_node_path_namespaceObject.resolve(process.env.GITHUB_WORKSPACE)
+        : workingDir;
+    const distDir = external_node_path_namespaceObject.join(workspace, 'dist');
+    external_node_fs_namespaceObject.mkdirSync(distDir, { recursive: true });
+    const tag = opts.releaseTag;
+    lib_core/* info */.pq(`Resolved release tag: ${tag}`);
+    const shape = detectShape(workingDir);
+    lib_core/* info */.pq(`Detected repo shape: ${shape}`);
+    // 1. Gate
+    let drift = false;
+    try {
+        const gate = await runGate(workingDir);
+        drift = gate.drift;
+    }
+    catch (err) {
+        // Surface gate failure cleanly; rethrow to let runner.run() catch it.
+        throw err;
+    }
+    // 2. Matrix pack
+    const packages = discoverPackages(workingDir, shape);
+    lib_core/* info */.pq(`Packing ${packages.length} package(s)...`);
+    const results = [];
+    for (const pkg of packages) {
+        const bundle = await packPackage(pkg.dir, distDir);
+        const { hex, sidecar } = writeSha256Sidecar(bundle);
+        results.push({
+            name: pkg.name,
+            version: pkg.version,
+            bundle,
+            sha256: hex,
+            sha256_path: sidecar,
+        });
+        lib_core/* info */.pq(`Packed ${pkg.name}@${pkg.version}: ${external_node_path_namespaceObject.basename(bundle)} (${hex.slice(0, 12)}...)`);
+    }
+    // 3. Stage marketplace.json (aggregator only, typically)
+    // Pick the highest semver-ish version among packages for the suffix when
+    // there is no top-level package; fall back to the tag.
+    const marketplaceVersion = tag.replace(/^v/i, '') || results.map(r => r.version).sort().pop() || 'unversioned';
+    const marketplacePath = stageMarketplaceJson(workingDir, distDir, marketplaceVersion);
+    // 4. Step summary (best-effort; never fails the run)
+    try {
+        const summary = renderStepSummary(shape, tag, results, marketplacePath, opts.skipPublish);
+        await lib_core/* summary */.z.addRaw(summary).write();
+    }
+    catch (err) {
+        lib_core/* warning */.$e(`Could not write step summary: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    // 5. Publish (or skip)
+    let releaseUrl = '';
+    if (!opts.skipPublish) {
+        const prerelease = resolvePrerelease(opts.releasePrerelease, tag);
+        const notes = opts.releaseNotes.trim() || renderDefaultReleaseNotes(results, marketplacePath);
+        // Files to attach: every .tar.gz, every .sha256 sidecar, the
+        // marketplace.json (when present). Pass each path positionally; gh
+        // CLI handles globless lists fine and we already know the exact set.
+        const files = [];
+        for (const r of results) {
+            files.push(r.bundle);
+            files.push(r.sha256_path);
+        }
+        if (marketplacePath)
+            files.push(marketplacePath);
+        // Write notes to a tmp file so we don't fight `gh`'s argument escaping
+        // for multi-line content.
+        const notesFile = external_node_path_namespaceObject.join(distDir, `.release-notes-${tag}.md`);
+        external_node_fs_namespaceObject.writeFileSync(notesFile, notes);
+        const ghArgs = ['release', 'create', tag, '--notes-file', notesFile];
+        if (opts.releaseName.trim()) {
+            ghArgs.push('--title', opts.releaseName.trim());
+        }
+        else {
+            ghArgs.push('--title', tag);
+        }
+        if (opts.releaseDraft)
+            ghArgs.push('--draft');
+        if (prerelease)
+            ghArgs.push('--prerelease');
+        ghArgs.push(...files);
+        lib_core/* info */.pq(`Publishing release: gh ${ghArgs.join(' ')}`);
+        let urlBuf = '';
+        const rc = await lib_exec/* exec */.m('gh', ghArgs, {
+            cwd: workingDir,
+            ignoreReturnCode: true,
+            listeners: {
+                stdout: (data) => { urlBuf += data.toString('utf8'); },
+            },
+        });
+        if (rc !== 0) {
+            throw new Error(`gh release create failed (exit ${rc}).`);
+        }
+        // gh release create prints the release URL to stdout.
+        releaseUrl = urlBuf.trim().split('\n').pop()?.trim() ?? '';
+    }
+    else {
+        lib_core/* info */.pq(`release-skip-publish=true -- not invoking gh release create`);
+    }
+    return {
+        packages: results,
+        marketplaceDrift: drift,
+        releaseUrl,
+        releaseTag: tag,
+    };
+}
+
 ;// CONCATENATED MODULE: ./src/runner.ts
 
 
@@ -41727,6 +42156,16 @@ var bundler = __nccwpck_require__(2744);
 
 
 
+
+/**
+ * Supported values for the `mode` input. `mode` is the high-level
+ * orchestration switch -- when set, it supersedes individual booleans
+ * (pack/bundle/etc.) and runs a fixed, opinionated pipeline.
+ *
+ * Today only 'release' is supported. Future modes (`audit`, `validate`)
+ * compose naturally without growing the boolean input matrix.
+ */
+const VALID_MODES = ['release'];
 /**
  * Allowed values for the `bundle-format` input.
  */
@@ -41800,6 +42239,86 @@ async function run() {
         const bundlesFileInput = lib_core/* getInput */.V4('bundles-file').trim();
         const packInput = lib_core/* getInput */.V4('pack') === 'true';
         const isolated = lib_core/* getInput */.V4('isolated') === 'true';
+        // MODE DISPATCH (umbrella orchestration). When `mode` is set, it
+        // supersedes pack/bundle/setup-only/etc. -- the mode runs its own
+        // fixed pipeline. Mutual-exclusion guard runs first so a misconfigured
+        // workflow fails before any side effects (install, mkdir, etc.).
+        const modeInput = lib_core/* getInput */.V4('mode').trim().toLowerCase();
+        if (modeInput) {
+            if (!VALID_MODES.includes(modeInput)) {
+                throw new Error(`mode must be one of: ${VALID_MODES.join(', ')} (got: '${modeInput}'). `
+                    + `Leave 'mode' empty to use the classic per-flag dispatch.`);
+            }
+            const modeConflicts = [];
+            if (packInput)
+                modeConflicts.push('pack');
+            if (bundleInput)
+                modeConflicts.push('bundle');
+            if (bundlesFileInput)
+                modeConflicts.push('bundles-file');
+            if (lib_core/* getInput */.V4('setup-only') === 'true')
+                modeConflicts.push('setup-only');
+            if (modeConflicts.length > 0) {
+                throw new Error(`mode='${modeInput}' is mutually exclusive with: ${modeConflicts.join(', ')}. `
+                    + `mode runs a fixed pipeline; remove the conflicting flag(s) or unset mode.`);
+            }
+            // Pass github-token (same precedence rules as below, replicated here so
+            // mode dispatch is self-contained and can short-circuit before the
+            // classic install flow.)
+            const ghToken = lib_core/* getInput */.V4('github-token');
+            if (ghToken) {
+                lib_core/* setSecret */.Pq(ghToken);
+                if (!process.env.GITHUB_TOKEN)
+                    process.env.GITHUB_TOKEN = ghToken;
+                if (!process.env.GITHUB_APM_PAT)
+                    process.env.GITHUB_APM_PAT = ghToken;
+            }
+            external_fs_.mkdirSync(resolvedDir, { recursive: true });
+            // Mode pipelines require the APM CLI; install + record the resolved
+            // version so downstream debugging is straightforward.
+            const installResult = await ensureApmInstalled();
+            lib_core/* setOutput */.uH('apm-version', installResult.resolvedVersion);
+            lib_core/* setOutput */.uH('apm-path', installResult.binaryPath);
+            if (modeInput === 'release') {
+                const releasePrerelease = (lib_core/* getInput */.V4('release-prerelease').trim() || 'auto').toLowerCase();
+                if (!['true', 'false', 'auto'].includes(releasePrerelease)) {
+                    throw new Error(`release-prerelease must be one of: true, false, auto (got: '${releasePrerelease}')`);
+                }
+                const result = await runReleaseMode({
+                    workingDir: resolvedDir,
+                    releaseTag: (() => {
+                        const inputTag = lib_core/* getInput */.V4('release-tag');
+                        const envRef = process.env.GITHUB_REF_NAME;
+                        // resolveReleaseTag lives in release.ts but throwing early
+                        // here keeps the action-surface error message close to the
+                        // input definition.
+                        const fromInput = inputTag.trim();
+                        if (fromInput)
+                            return fromInput;
+                        const fromEnv = (envRef ?? '').trim();
+                        if (fromEnv)
+                            return fromEnv;
+                        throw new Error(`Cannot resolve release-tag: input is empty and `
+                            + `GITHUB_REF_NAME is unset. Pass release-tag explicitly or `
+                            + `trigger the workflow on a tag push (on.push.tags).`);
+                    })(),
+                    releaseName: lib_core/* getInput */.V4('release-name'),
+                    releaseNotes: lib_core/* getInput */.V4('release-notes'),
+                    releaseDraft: lib_core/* getInput */.V4('release-draft') === 'true',
+                    releasePrerelease: releasePrerelease,
+                    skipPublish: lib_core/* getInput */.V4('release-skip-publish') === 'true',
+                });
+                lib_core/* setOutput */.uH('packages', JSON.stringify(result.packages));
+                lib_core/* setOutput */.uH('marketplace-drift', result.marketplaceDrift ? 'true' : 'false');
+                lib_core/* setOutput */.uH('release-url', result.releaseUrl);
+                lib_core/* setOutput */.uH('release-tag', result.releaseTag);
+                lib_core/* setOutput */.uH('success', 'true');
+                lib_core/* info */.pq(`APM action completed successfully (mode: release)`);
+                return;
+            }
+            // Unreachable today; here for the next mode added.
+            throw new Error(`mode='${modeInput}' has no dispatch implementation`);
+        }
         // Validate `target` once, up front. The value flows into either the
         // generated apm.yml (isolated mode) or `apm pack --target` (pack
         // mode), both of which are unsafe with raw input. Failing here -- before
@@ -41878,6 +42397,8 @@ async function run() {
                 conflicts.push('offline');
             if (lib_core/* getInput */.V4('include-prerelease') === 'true')
                 conflicts.push('include-prerelease');
+            if (lib_core/* getInput */.V4('mode').trim())
+                conflicts.push('mode');
             if (conflicts.length > 0) {
                 throw new Error(`'setup-only' is mutually exclusive with: ${conflicts.join(', ')}. `
                     + `setup-only installs the APM CLI onto PATH and exits; remove the `

@@ -129,6 +129,69 @@ inputs:
     description: 'Install the APM CLI onto PATH and exit. Skips apm install and all project-level operations. Use subsequent steps to run apm commands directly. Mutually exclusive with pack, bundle, bundles-file, isolated, compile, script, dependencies, audit-report, target, bundle-format, marketplace, marketplace-path, json-output, offline, include-prerelease.'
     required: false
     default: 'false'
+  mode:
+    description: |
+      High-level orchestration mode. When set, the action runs a fixed,
+      opinionated pipeline that supersedes the per-flag dispatch
+      (pack/bundle/setup-only/etc.).
+
+      Supported values:
+        release   Validate -> matrix-pack -> sha256 sidecars -> stage
+                  marketplace.json -> GH Step Summary -> gh release create.
+                  Companion inputs: release-tag, release-name, release-notes,
+                  release-draft, release-prerelease, release-skip-publish.
+
+      Vendor-neutral note: `mode` is a GitHub Actions CONVENIENCE WRAPPER
+      around the apm CLI primitives. The contract lives in the CLI
+      (`apm pack --check-versions --check-clean`, etc.); producers on
+      Jenkins, GitLab, ADO, or local laptops compose the same primitives
+      directly. See docs/producer/releasing-from-any-ci.md.
+
+      Mutually exclusive with: pack, bundle, bundles-file, setup-only.
+    required: false
+    default: ''
+  release-tag:
+    description: |
+      Used with mode: release. Tag for the GitHub Release (e.g. v1.2.3).
+      Defaults to GITHUB_REF_NAME when the workflow is triggered on a tag
+      push. Used to derive default release name, default prerelease flag
+      (via the `-` suffix convention), and the marketplace.json filename
+      suffix.
+    required: false
+    default: ''
+  release-name:
+    description: |
+      Used with mode: release. Display name for the GitHub Release.
+      Defaults to release-tag.
+    required: false
+    default: ''
+  release-notes:
+    description: |
+      Used with mode: release. Body for the GitHub Release. When empty,
+      the action auto-generates a table of (package, version, bundle,
+      sha256) with a verify hint.
+    required: false
+    default: ''
+  release-draft:
+    description: |
+      Used with mode: release. Create the GitHub Release as draft.
+      Default: false.
+    required: false
+    default: 'false'
+  release-prerelease:
+    description: |
+      Used with mode: release. One of: true, false, auto. `auto` (default)
+      marks the release as a prerelease when the tag contains `-` (semver
+      pre-release suffix, e.g. v1.2.3-rc.1).
+    required: false
+    default: 'auto'
+  release-skip-publish:
+    description: |
+      Used with mode: release. Run every step EXCEPT `gh release create`.
+      Useful for dry-runs, local verification, and PR-builds that should
+      validate the pipeline without publishing. Default: false.
+    required: false
+    default: 'false'
 
 outputs:
   success:
@@ -149,6 +212,26 @@ outputs:
     description: 'Resolved APM CLI version string (e.g. "0.11.0"). Always set.'
   apm-path:
     description: 'Full path to the apm executable used by the action. Resolved via tool-cache when the action installed APM, or via `which apm` when reusing a pre-existing apm on PATH.'
+  packages:
+    description: |
+      Set by mode: release. JSON array of packaged artifacts produced by
+      the release pipeline. Each element has:
+        {name, version, bundle, sha256, sha256_path}
+      Empty array when mode != release.
+  marketplace-drift:
+    description: |
+      Set by mode: release. `true` when `apm pack --check-clean` detected
+      uncommitted changes in the marketplace tree (the action also fails
+      the run in this case); `false` otherwise. Exists for downstream
+      steps that want to branch on drift before the failure surfaces.
+  release-url:
+    description: |
+      Set by mode: release. URL of the GitHub Release created by this
+      run. Empty when release-skip-publish=true.
+  release-tag:
+    description: |
+      Set by mode: release. Resolved release tag (input or
+      GITHUB_REF_NAME).
 
 runs:
   using: 'node24'
