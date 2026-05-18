@@ -432,6 +432,91 @@ describe('runPackStep', () => {
     stderrSpy.mockRestore();
   });
 
+  it('still forwards stderr when pack exits non-zero (regression trap for failure diagnosis)', async () => {
+    const jsonRel = path.join('reports', 'pack.json');
+    const stderrSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    mockExec.mockImplementation(async (_cmd, _args, options?: unknown) => {
+      const opts = options as {
+        listeners?: {
+          stdout?: (data: Buffer) => void;
+          stderr?: (data: Buffer) => void;
+        };
+      } | undefined;
+      // Emit a CLI failure diagnostic on stderr, then exit non-zero.
+      opts?.listeners?.stderr?.(Buffer.from('apm: marketplace path traversal blocked\n', 'utf8'));
+      opts?.listeners?.stdout?.(Buffer.from('{"error":"path traversal"}', 'utf8'));
+      return 2;
+    });
+
+    await expect(runPackStep(tmpDir, {
+      archive: true,
+      format: 'apm',
+      jsonOutput: jsonRel,
+    })).rejects.toThrow('apm pack failed with exit code 2');
+
+    expect(stderrSpy).toHaveBeenCalled();
+    const forwarded = (stderrSpy.mock.calls[0][0] as Buffer).toString('utf8');
+    expect(forwarded).toContain('marketplace path traversal blocked');
+    stderrSpy.mockRestore();
+  });
+
+  it('accepts an absolute jsonOutput path that resolves inside the working directory', async () => {
+    fs.writeFileSync(path.join(buildDir, 'test-pkg-1.0.0.tar.gz'), 'fake');
+    const jsonAbs = path.join(tmpDir, 'reports', 'pack.json');
+
+    mockExec.mockImplementation(async (_cmd, _args, options?: unknown) => {
+      const opts = options as {
+        listeners?: { stdout?: (data: Buffer) => void };
+      } | undefined;
+      opts?.listeners?.stdout?.(Buffer.from('{"ok":true}', 'utf8'));
+      return 0;
+    });
+
+    const result = await runPackStep(tmpDir, {
+      archive: true,
+      format: 'apm',
+      jsonOutput: jsonAbs,
+    });
+
+    expect(result.marketplaceJsonPath).toBe(jsonAbs);
+    expect(fs.existsSync(jsonAbs)).toBe(true);
+  });
+
+  it('rejects a jsonOutput path that escapes the working directory (relative)', async () => {
+    fs.writeFileSync(path.join(buildDir, 'test-pkg-1.0.0.tar.gz'), 'fake');
+    mockExec.mockImplementation(async (_cmd, _args, options?: unknown) => {
+      const opts = options as {
+        listeners?: { stdout?: (data: Buffer) => void };
+      } | undefined;
+      opts?.listeners?.stdout?.(Buffer.from('{}', 'utf8'));
+      return 0;
+    });
+
+    await expect(runPackStep(tmpDir, {
+      archive: true,
+      format: 'apm',
+      jsonOutput: '../escape.json',
+    })).rejects.toThrow('json-output path resolves outside the working directory');
+  });
+
+  it('rejects a jsonOutput absolute path that escapes the working directory', async () => {
+    fs.writeFileSync(path.join(buildDir, 'test-pkg-1.0.0.tar.gz'), 'fake');
+    mockExec.mockImplementation(async (_cmd, _args, options?: unknown) => {
+      const opts = options as {
+        listeners?: { stdout?: (data: Buffer) => void };
+      } | undefined;
+      opts?.listeners?.stdout?.(Buffer.from('{}', 'utf8'));
+      return 0;
+    });
+
+    await expect(runPackStep(tmpDir, {
+      archive: true,
+      format: 'apm',
+      jsonOutput: '/tmp/elsewhere/pack.json',
+    })).rejects.toThrow('json-output path resolves outside the working directory');
+  });
+
   it('returns null bundlePath for marketplace-only pack with json output', async () => {
     // No bundle written to buildDir -- simulates marketplace-only project.
     const jsonRel = path.join('reports', 'pack.json');

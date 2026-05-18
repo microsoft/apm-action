@@ -85,11 +85,12 @@ inputs:
   marketplace-path:
     description: |
       Forwarded to `apm pack --marketplace-path FORMAT=PATH` (used with
-      pack: true). Repeatable: provide one override per line, or
-      comma-separate them on a single line. Each entry must be in
-      `FORMAT=PATH` shape (e.g. `claude=marketplace.json`). Overrides the
-      output path for the named format; useful for placing files at
+      pack: true). Repeatable: one override per line. Each entry must be
+      in `FORMAT=PATH` shape (e.g. `claude=marketplace.json`). Overrides
+      the output path for the named format; useful for placing files at
       vendor-expected locations within the same release artifact set.
+      Separator is newline only -- `,` is a legal filename character and
+      is not used as a separator.
     required: false
     default: ''
   json-output:

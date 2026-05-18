@@ -29,27 +29,36 @@ function resolveBundleFormat(): BundleFormat {
 /**
  * Parse the `marketplace-path` input into a list of `FORMAT=PATH`
  * overrides suitable for forwarding as repeated `--marketplace-path`
- * arguments. Accepts:
- *   - newline-separated entries (one override per line)
- *   - comma-separated entries (one override per item)
- *   - a single entry on one line
+ * arguments.
+ *
+ * Separator is newline only. `,` is a legal filename character, so
+ * comma-splitting would silently mangle paths like
+ * `releases/v1,beta.json`. This matches the convention used by
+ * `actions/upload-artifact` and `gh` for multi-path inputs.
  *
  * Empty/blank lines are stripped. Lines that do not match `FORMAT=PATH`
  * are surfaced as errors -- silently dropping them turns into a debugging
  * trap when CI emits the "wrong" file.
+ *
+ * The PATH portion is forwarded verbatim to `apm pack --marketplace-path`
+ * and the APM CLI is the source of truth for path-containment / traversal
+ * checks on its output writes. The action layer intentionally delegates
+ * that validation so format-specific rules (e.g. extension constraints)
+ * stay in one place.
  */
 function parseMarketplacePath(raw: string): string[] {
   const trimmed = raw.trim();
   if (!trimmed) return [];
   const items = trimmed
-    .split(/[\n,]/)
+    .split('\n')
     .map(s => s.trim())
     .filter(s => s.length > 0);
   for (const item of items) {
     if (!/^[A-Za-z0-9_-]+=.+$/.test(item)) {
       throw new Error(
-        `marketplace-path entries must be in 'FORMAT=PATH' shape (got: '${item}'). `
-        + `Provide one override per line or comma-separate them.`,
+        `marketplace-path entries must be in 'FORMAT=PATH' shape `
+        + `(e.g. 'claude=marketplace.json'); got: '${item}'. `
+        + `Provide one override per line.`,
       );
     }
   }

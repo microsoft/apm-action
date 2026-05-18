@@ -32864,8 +32864,17 @@ async function runPackStep(workingDir, opts) {
     let marketplaceJsonPath = null;
     if (opts.jsonOutput) {
         const resolvedJsonPath = external_path_.isAbsolute(opts.jsonOutput)
-            ? opts.jsonOutput
-            : external_path_.join(resolvedDir, opts.jsonOutput);
+            ? external_path_.resolve(opts.jsonOutput)
+            : external_path_.resolve(resolvedDir, opts.jsonOutput);
+        // Workspace containment: the action layer must not write outside the
+        // working directory. Cosmetic on GitHub-hosted ephemeral runners; load-
+        // bearing on self-hosted and shared runners. Mirrors resolveLocalBundle.
+        const rel = external_path_.relative(resolvedDir, resolvedJsonPath);
+        if (rel.startsWith('..') || external_path_.isAbsolute(rel)) {
+            throw new Error(`json-output path resolves outside the working directory: '${opts.jsonOutput}' `
+                + `(resolved to '${resolvedJsonPath}', working-directory is '${resolvedDir}'). `
+                + `Use a workspace-relative path.`);
+        }
         external_fs_.mkdirSync(external_path_.dirname(resolvedJsonPath), { recursive: true });
         external_fs_.writeFileSync(resolvedJsonPath, Buffer.concat(jsonChunks));
         marketplaceJsonPath = resolvedJsonPath;
@@ -32881,11 +32890,15 @@ async function runPackStep(workingDir, opts) {
         lib_core/* info */.pq('No bundle produced (marketplace-only project); see pack JSON report.');
     }
     else {
-        // No bundle and no JSON report to fall back on -- this is the only
-        // path that should still be a hard error for legacy callers.
-        throw new Error('apm pack produced no bundle. If this is a marketplace-only project, '
-            + 'set the json-output input so the action can surface the marketplace '
-            + 'artifacts.');
+        // No bundle and no JSON report. Two distinct misconfigurations land
+        // here; surface both so users do not blindly set json-output and then
+        // wonder why bundle-path is still empty.
+        throw new Error('apm pack produced no bundle. Two common causes:\n'
+            + '  1. The project has a `dependencies:` block but the install/pack '
+            + 'step failed silently. Check the logs above.\n'
+            + '  2. The project is marketplace-only (no `dependencies:` block in '
+            + 'apm.yml). In that case set the json-output input so the action can '
+            + 'surface the marketplace artifacts via the pack-json output.');
     }
     return { bundlePath, format: opts.format, marketplaceJsonPath };
 }
@@ -41733,27 +41746,36 @@ function resolveBundleFormat() {
 /**
  * Parse the `marketplace-path` input into a list of `FORMAT=PATH`
  * overrides suitable for forwarding as repeated `--marketplace-path`
- * arguments. Accepts:
- *   - newline-separated entries (one override per line)
- *   - comma-separated entries (one override per item)
- *   - a single entry on one line
+ * arguments.
+ *
+ * Separator is newline only. `,` is a legal filename character, so
+ * comma-splitting would silently mangle paths like
+ * `releases/v1,beta.json`. This matches the convention used by
+ * `actions/upload-artifact` and `gh` for multi-path inputs.
  *
  * Empty/blank lines are stripped. Lines that do not match `FORMAT=PATH`
  * are surfaced as errors -- silently dropping them turns into a debugging
  * trap when CI emits the "wrong" file.
+ *
+ * The PATH portion is forwarded verbatim to `apm pack --marketplace-path`
+ * and the APM CLI is the source of truth for path-containment / traversal
+ * checks on its output writes. The action layer intentionally delegates
+ * that validation so format-specific rules (e.g. extension constraints)
+ * stay in one place.
  */
 function parseMarketplacePath(raw) {
     const trimmed = raw.trim();
     if (!trimmed)
         return [];
     const items = trimmed
-        .split(/[\n,]/)
+        .split('\n')
         .map(s => s.trim())
         .filter(s => s.length > 0);
     for (const item of items) {
         if (!/^[A-Za-z0-9_-]+=.+$/.test(item)) {
-            throw new Error(`marketplace-path entries must be in 'FORMAT=PATH' shape (got: '${item}'). `
-                + `Provide one override per line or comma-separate them.`);
+            throw new Error(`marketplace-path entries must be in 'FORMAT=PATH' shape `
+                + `(e.g. 'claude=marketplace.json'); got: '${item}'. `
+                + `Provide one override per line.`);
         }
     }
     return items;

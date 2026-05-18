@@ -295,8 +295,19 @@ export async function runPackStep(
   let marketplaceJsonPath: string | null = null;
   if (opts.jsonOutput) {
     const resolvedJsonPath = path.isAbsolute(opts.jsonOutput)
-      ? opts.jsonOutput
-      : path.join(resolvedDir, opts.jsonOutput);
+      ? path.resolve(opts.jsonOutput)
+      : path.resolve(resolvedDir, opts.jsonOutput);
+    // Workspace containment: the action layer must not write outside the
+    // working directory. Cosmetic on GitHub-hosted ephemeral runners; load-
+    // bearing on self-hosted and shared runners. Mirrors resolveLocalBundle.
+    const rel = path.relative(resolvedDir, resolvedJsonPath);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) {
+      throw new Error(
+        `json-output path resolves outside the working directory: '${opts.jsonOutput}' `
+        + `(resolved to '${resolvedJsonPath}', working-directory is '${resolvedDir}'). `
+        + `Use a workspace-relative path.`,
+      );
+    }
     fs.mkdirSync(path.dirname(resolvedJsonPath), { recursive: true });
     fs.writeFileSync(resolvedJsonPath, Buffer.concat(jsonChunks));
     marketplaceJsonPath = resolvedJsonPath;
@@ -311,12 +322,16 @@ export async function runPackStep(
   } else if (marketplaceJsonPath !== null) {
     core.info('No bundle produced (marketplace-only project); see pack JSON report.');
   } else {
-    // No bundle and no JSON report to fall back on -- this is the only
-    // path that should still be a hard error for legacy callers.
+    // No bundle and no JSON report. Two distinct misconfigurations land
+    // here; surface both so users do not blindly set json-output and then
+    // wonder why bundle-path is still empty.
     throw new Error(
-      'apm pack produced no bundle. If this is a marketplace-only project, '
-      + 'set the json-output input so the action can surface the marketplace '
-      + 'artifacts.',
+      'apm pack produced no bundle. Two common causes:\n'
+      + '  1. The project has a `dependencies:` block but the install/pack '
+      + 'step failed silently. Check the logs above.\n'
+      + '  2. The project is marketplace-only (no `dependencies:` block in '
+      + 'apm.yml). In that case set the json-output input so the action can '
+      + 'surface the marketplace artifacts via the pack-json output.',
     );
   }
   return { bundlePath, format: opts.format, marketplaceJsonPath };

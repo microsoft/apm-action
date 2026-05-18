@@ -1336,7 +1336,7 @@ describe('pack pass-through inputs (marketplace, json, offline, prerelease)', ()
     expect(mockSetOutput).toHaveBeenCalledWith('pack-json', path.join(tmpDir, 'pack.json'));
   });
 
-  it('parses comma-separated marketplace-path entries', async () => {
+  it('parses newline-separated marketplace-path entries (newline is the only separator)', async () => {
     seedApmYml();
     mockRunPackStep.mockResolvedValue({
       bundlePath: path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'),
@@ -1346,7 +1346,7 @@ describe('pack pass-through inputs (marketplace, json, offline, prerelease)', ()
 
     mockGetInput.mockImplementation(inputs({
       pack: 'true',
-      'marketplace-path': 'claude=a.json, codex=b.toml',
+      'marketplace-path': 'claude=a.json\ncodex=b.toml',
     }));
     await run();
 
@@ -1356,7 +1356,27 @@ describe('pack pass-through inputs (marketplace, json, offline, prerelease)', ()
     expect(opts?.marketplacePath).toEqual(['claude=a.json', 'codex=b.toml']);
   });
 
-  it('rejects malformed marketplace-path entries', async () => {
+  it('preserves commas inside marketplace-path filenames (does not split on comma)', async () => {
+    seedApmYml();
+    mockRunPackStep.mockResolvedValue({
+      bundlePath: path.join(tmpDir, 'build', 'pkg-1.0.0.tar.gz'),
+      format: 'apm',
+      marketplaceJsonPath: null,
+    });
+
+    mockGetInput.mockImplementation(inputs({
+      pack: 'true',
+      'marketplace-path': 'claude=releases/v1,beta.json',
+    }));
+    await run();
+
+    const opts = mockRunPackStep.mock.calls[0]?.[1] as {
+      marketplacePath?: string[];
+    } | undefined;
+    expect(opts?.marketplacePath).toEqual(['claude=releases/v1,beta.json']);
+  });
+
+  it('rejects malformed marketplace-path entries with an example in the error', async () => {
     seedApmYml();
     mockGetInput.mockImplementation(inputs({
       pack: 'true',
@@ -1365,7 +1385,7 @@ describe('pack pass-through inputs (marketplace, json, offline, prerelease)', ()
     await run();
 
     expect(mockSetFailed).toHaveBeenCalledWith(
-      expect.stringContaining("must be in 'FORMAT=PATH' shape"),
+      expect.stringContaining("'claude=marketplace.json'"),
     );
   });
 

@@ -283,7 +283,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | `target` | No | | Bundle target: `copilot`, `vscode`, `claude`, or `all` (used with `pack: true`) |
 | `archive` | No | `true` | Produce `.tar.gz` instead of directory (used with `pack: true`) |
 | `marketplace` | No | | Forwarded to `apm pack --marketplace=<value>` (used with `pack: true`). Comma-separated format list (`claude,codex`), `all`, or `none`. Defaults to whatever is configured in `apm.yml`'s `outputs:` map. |
-| `marketplace-path` | No | | Forwarded to `apm pack --marketplace-path FORMAT=PATH` (used with `pack: true`). Repeatable: one `FORMAT=PATH` override per line, or comma-separated. Overrides where each marketplace format file is written. |
+| `marketplace-path` | No | | Forwarded to `apm pack --marketplace-path FORMAT=PATH` (used with `pack: true`). Repeatable: one `FORMAT=PATH` override per line. Newline is the only separator -- `,` is a legal filename character. Overrides where each marketplace format file is written. |
 | `json-output` | No | | Forwarded to `apm pack --json` (used with `pack: true`). When set, the action passes `--json` to the CLI and captures the JSON report to this path. Consume from downstream steps via the `pack-json` output. |
 | `offline` | No | `false` | Forwarded to `apm pack --offline` (used with `pack: true`). Skips network resolution of marketplace dependency refs. Useful in hermetic CI where versions are pinned in `apm.lock.yaml`. |
 | `include-prerelease` | No | `false` | Forwarded to `apm pack --include-prerelease` (used with `pack: true`). Considers pre-release version tags when resolving marketplace dependency refs. |
@@ -298,7 +298,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | `apm-path` | Absolute path to the resolved `apm` binary. Resolved via tool-cache when the action installed APM, or via `which apm` when reusing a pre-existing CLI on `PATH`. |
 | `bundle-format` | Format of the produced or restored bundle (`apm` or `plugin`). Set in pack and single-bundle restore modes. |
 | `primitives-path` | Path where agent primitives were deployed (`.github`) |
-| `bundle-path` | Path to the packed bundle (only set in pack mode). Empty string when the project produced only marketplace artifacts (no `dependencies:` block in `apm.yml`) — consume `pack-json` to discover what was emitted. |
+| `bundle-path` | Path to the packed bundle (only set in pack mode). **Now empty** for marketplace-only projects (no `dependencies:` block in `apm.yml`) — consume `pack-json` to discover what was emitted. Pre-existing `if: steps.pack.outputs.bundle-path != ''` guards continue to work and will correctly skip downstream upload steps on marketplace-only projects. |
 | `pack-json` | Path to the captured `apm pack --json` report. Set when the `json-output` input was provided. Source of truth for downstream steps that need to enumerate every artifact (bundles, marketplace files, sidecars) without globbing `build/`. |
 | `audit-report-path` | Path to the generated SARIF audit report (if `audit-report` was set) |
 | `bundles-restored` | Number of bundles successfully restored (multi-bundle mode only) |
