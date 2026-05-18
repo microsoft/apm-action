@@ -271,10 +271,19 @@ export async function runPackStep(
     env: { ...process.env as Record<string, string> },
   };
   if (opts.jsonOutput) {
+    // silent: true suppresses both stdout and stderr from @actions/exec.
+    // We need stdout suppressed (it's the JSON payload going to disk, not
+    // the job log), but stderr is where the CLI emits human-readable
+    // progress logs and failure diagnostics under --json. Re-attach a
+    // stderr listener that forwards every chunk to the job log so a
+    // failed pack still surfaces actionable detail beyond the exit code.
     execOpts.silent = true;
     execOpts.listeners = {
       stdout: (data: Buffer) => {
         jsonChunks.push(Buffer.from(data));
+      },
+      stderr: (data: Buffer) => {
+        process.stderr.write(data);
       },
     };
   }

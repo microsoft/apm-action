@@ -1411,7 +1411,7 @@ describe('pack pass-through inputs (marketplace, json, offline, prerelease)', ()
     await run();
 
     expect(mockSetFailed).toHaveBeenCalledWith(
-      expect.stringContaining('marketplace-path was set but pack is not enabled'),
+      expect.stringContaining('marketplace-path input was set but pack is not enabled'),
     );
   });
 
@@ -1425,7 +1425,35 @@ describe('pack pass-through inputs (marketplace, json, offline, prerelease)', ()
     await run();
 
     expect(mockSetFailed).toHaveBeenCalledWith(
-      expect.stringContaining('marketplace, json-output, offline was set but pack is not enabled'),
+      expect.stringContaining('marketplace, json-output, offline inputs were set but pack is not enabled'),
+    );
+  });
+
+  it('rejects marketplace set in bundle restore mode', async () => {
+    const bundleFile = path.join(tmpDir, 'bundle.tar.gz');
+    fs.writeFileSync(bundleFile, 'stub');
+    mockGetInput.mockImplementation(inputs({
+      bundle: bundleFile,
+      marketplace: 'claude',
+    }));
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('marketplace input was set but pack is not enabled'),
+    );
+  });
+
+  it('rejects json-output set in bundles-file restore mode', async () => {
+    const listFile = path.join(tmpDir, 'bundles.txt');
+    fs.writeFileSync(listFile, '');
+    mockGetInput.mockImplementation(inputs({
+      'bundles-file': listFile,
+      'json-output': 'pack.json',
+    }));
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining('json-output input was set but pack is not enabled'),
     );
   });
 });

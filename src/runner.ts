@@ -183,6 +183,25 @@ export async function run(): Promise<void> {
       );
     }
 
+    // Reject pack pass-through inputs outside pack mode early, so they
+    // are not silently ignored in bundle / bundles-file restore paths or
+    // in the default install flow. Matches the setup-only conflict shape.
+    if (!packInput) {
+      const marketplaceMisuse: string[] = [];
+      if (core.getInput('marketplace').trim()) marketplaceMisuse.push('marketplace');
+      if (core.getInput('marketplace-path').trim()) marketplaceMisuse.push('marketplace-path');
+      if (core.getInput('json-output').trim()) marketplaceMisuse.push('json-output');
+      if (core.getInput('offline') === 'true') marketplaceMisuse.push('offline');
+      if (core.getInput('include-prerelease') === 'true') marketplaceMisuse.push('include-prerelease');
+      if (marketplaceMisuse.length > 0) {
+        const label = marketplaceMisuse.length === 1 ? 'input was' : 'inputs were';
+        throw new Error(
+          `${marketplaceMisuse.join(', ')} ${label} set but pack is not enabled. `
+          + `Set pack: true to forward these inputs to apm pack, or remove them.`,
+        );
+      }
+    }
+
     // Directory creation contract:
     //   - isolated / pack / bundle (restore) modes: the action owns the workspace
     //     lifecycle and creates the directory automatically. These modes bootstrap
@@ -414,25 +433,14 @@ export async function run(): Promise<void> {
     } else {
       // bundle-format only makes sense with pack: true. Surface the misuse
       // explicitly rather than silently ignoring the input.
+      // (Marketplace pass-through inputs are rejected earlier, before any
+      // mode-specific work, so they reject consistently across bundle /
+      // bundles-file / default install paths.)
       const fmtRaw = core.getInput('bundle-format').trim();
       if (fmtRaw) {
         throw new Error(
           `bundle-format='${fmtRaw}' was set but pack is not enabled. `
           + `Set pack: true to produce a bundle, or remove bundle-format.`,
-        );
-      }
-      // The marketplace pass-through inputs only make sense with pack: true.
-      // Reject the misuse rather than silently ignoring it.
-      const marketplaceMisuse: string[] = [];
-      if (core.getInput('marketplace').trim()) marketplaceMisuse.push('marketplace');
-      if (core.getInput('marketplace-path').trim()) marketplaceMisuse.push('marketplace-path');
-      if (core.getInput('json-output').trim()) marketplaceMisuse.push('json-output');
-      if (core.getInput('offline') === 'true') marketplaceMisuse.push('offline');
-      if (core.getInput('include-prerelease') === 'true') marketplaceMisuse.push('include-prerelease');
-      if (marketplaceMisuse.length > 0) {
-        throw new Error(
-          `${marketplaceMisuse.join(', ')} was set but pack is not enabled. `
-          + `Set pack: true to forward these inputs to apm pack, or remove them.`,
         );
       }
     }

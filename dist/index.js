@@ -32841,10 +32841,19 @@ async function runPackStep(workingDir, opts) {
         env: { ...process.env },
     };
     if (opts.jsonOutput) {
+        // silent: true suppresses both stdout and stderr from @actions/exec.
+        // We need stdout suppressed (it's the JSON payload going to disk, not
+        // the job log), but stderr is where the CLI emits human-readable
+        // progress logs and failure diagnostics under --json. Re-attach a
+        // stderr listener that forwards every chunk to the job log so a
+        // failed pack still surfaces actionable detail beyond the exit code.
         execOpts.silent = true;
         execOpts.listeners = {
             stdout: (data) => {
                 jsonChunks.push(Buffer.from(data));
+            },
+            stderr: (data) => {
+                process.stderr.write(data);
             },
         };
     }
@@ -41878,6 +41887,27 @@ async function run() {
             throw new Error(`inputs 'pack', 'bundle', and 'bundles-file' are mutually exclusive `
                 + `(got: ${modeFlags.join(', ')}). Pick exactly one mode per step.`);
         }
+        // Reject pack pass-through inputs outside pack mode early, so they
+        // are not silently ignored in bundle / bundles-file restore paths or
+        // in the default install flow. Matches the setup-only conflict shape.
+        if (!packInput) {
+            const marketplaceMisuse = [];
+            if (lib_core/* getInput */.V4('marketplace').trim())
+                marketplaceMisuse.push('marketplace');
+            if (lib_core/* getInput */.V4('marketplace-path').trim())
+                marketplaceMisuse.push('marketplace-path');
+            if (lib_core/* getInput */.V4('json-output').trim())
+                marketplaceMisuse.push('json-output');
+            if (lib_core/* getInput */.V4('offline') === 'true')
+                marketplaceMisuse.push('offline');
+            if (lib_core/* getInput */.V4('include-prerelease') === 'true')
+                marketplaceMisuse.push('include-prerelease');
+            if (marketplaceMisuse.length > 0) {
+                const label = marketplaceMisuse.length === 1 ? 'input was' : 'inputs were';
+                throw new Error(`${marketplaceMisuse.join(', ')} ${label} set but pack is not enabled. `
+                    + `Set pack: true to forward these inputs to apm pack, or remove them.`);
+            }
+        }
         // Directory creation contract:
         //   - isolated / pack / bundle (restore) modes: the action owns the workspace
         //     lifecycle and creates the directory automatically. These modes bootstrap
@@ -42075,27 +42105,13 @@ async function run() {
         else {
             // bundle-format only makes sense with pack: true. Surface the misuse
             // explicitly rather than silently ignoring the input.
+            // (Marketplace pass-through inputs are rejected earlier, before any
+            // mode-specific work, so they reject consistently across bundle /
+            // bundles-file / default install paths.)
             const fmtRaw = lib_core/* getInput */.V4('bundle-format').trim();
             if (fmtRaw) {
                 throw new Error(`bundle-format='${fmtRaw}' was set but pack is not enabled. `
                     + `Set pack: true to produce a bundle, or remove bundle-format.`);
-            }
-            // The marketplace pass-through inputs only make sense with pack: true.
-            // Reject the misuse rather than silently ignoring it.
-            const marketplaceMisuse = [];
-            if (lib_core/* getInput */.V4('marketplace').trim())
-                marketplaceMisuse.push('marketplace');
-            if (lib_core/* getInput */.V4('marketplace-path').trim())
-                marketplaceMisuse.push('marketplace-path');
-            if (lib_core/* getInput */.V4('json-output').trim())
-                marketplaceMisuse.push('json-output');
-            if (lib_core/* getInput */.V4('offline') === 'true')
-                marketplaceMisuse.push('offline');
-            if (lib_core/* getInput */.V4('include-prerelease') === 'true')
-                marketplaceMisuse.push('include-prerelease');
-            if (marketplaceMisuse.length > 0) {
-                throw new Error(`${marketplaceMisuse.join(', ')} was set but pack is not enabled. `
-                    + `Set pack: true to forward these inputs to apm pack, or remove them.`);
             }
         }
         lib_core/* setOutput */.uH('success', 'true');

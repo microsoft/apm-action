@@ -399,6 +399,39 @@ describe('runPackStep', () => {
     expect(fs.readFileSync(expected, 'utf8')).toBe(jsonReport);
   });
 
+  it('forwards stderr to the job log when capturing --json stdout', async () => {
+    fs.writeFileSync(path.join(buildDir, 'test-pkg-1.0.0.tar.gz'), 'fake');
+    const jsonReport = '{"bundles":[]}';
+    const jsonRel = path.join('reports', 'pack.json');
+    const stderrSpy = jest.spyOn(process.stderr, 'write').mockImplementation(() => true);
+
+    mockExec.mockImplementation(async (_cmd, _args, options?: unknown) => {
+      const opts = options as {
+        silent?: boolean;
+        listeners?: {
+          stdout?: (data: Buffer) => void;
+          stderr?: (data: Buffer) => void;
+        };
+      } | undefined;
+      expect(opts?.silent).toBe(true);
+      expect(typeof opts?.listeners?.stderr).toBe('function');
+      opts?.listeners?.stderr?.(Buffer.from('pack diagnostic line\n', 'utf8'));
+      opts?.listeners?.stdout?.(Buffer.from(jsonReport, 'utf8'));
+      return 0;
+    });
+
+    await runPackStep(tmpDir, {
+      archive: true,
+      format: 'apm',
+      jsonOutput: jsonRel,
+    });
+
+    expect(stderrSpy).toHaveBeenCalledWith(expect.any(Buffer));
+    const forwarded = (stderrSpy.mock.calls[0][0] as Buffer).toString('utf8');
+    expect(forwarded).toContain('pack diagnostic line');
+    stderrSpy.mockRestore();
+  });
+
   it('returns null bundlePath for marketplace-only pack with json output', async () => {
     // No bundle written to buildDir -- simulates marketplace-only project.
     const jsonRel = path.join('reports', 'pack.json');
