@@ -217,7 +217,8 @@ outputs:
       Set by mode: release. JSON array of packaged artifacts produced by
       the release pipeline. Each element has:
         {name, version, bundle, sha256, sha256_path}
-      Empty array when mode != release.
+      Always emitted as '[]' (empty array) outside mode: release so
+      downstream steps can parse the output unconditionally.
   marketplace-drift:
     description: |
       Set by mode: release. `true` when `apm pack --check-clean` detected

@@ -66,6 +66,37 @@ export function resolveReleaseTag(
 }
 
 /**
+ * Sanitize a release tag for safe use in a file or directory name.
+ *
+ * Git tag names can legally include `/`, `..`, control characters, and
+ * other path-delimiter bytes (the Git ref grammar bans only a small
+ * subset). Using a raw tag inside `path.join(...)` can write outside the
+ * intended dist/ tree (path traversal) or create unintended subdirs.
+ *
+ * Allow only `[A-Za-z0-9._-]`; collapse every other byte to `-`. Strip
+ * leading dots so the result cannot be `..` or `.hidden`. Empty input
+ * (or input that sanitizes to empty) returns `unversioned`.
+ *
+ * IMPORTANT: callers must still pass the ORIGINAL tag to `gh release create`
+ * -- sanitization is purely for local filesystem paths.
+ */
+export function sanitizeTagForPath(tag: string): string {
+  let cleaned = (tag ?? '')
+    .replace(/[^A-Za-z0-9._-]+/g, '-');
+  // Collapse runs of dots (`..`, `...`) -- they have no legitimate use
+  // in a version string and produce ugly filenames. Defense-in-depth.
+  cleaned = cleaned.replace(/\.{2,}/g, '.');
+  // Drop dots and dashes adjacent to separators so `v1-.-v2` becomes
+  // `v1-v2` and `..-foo` becomes `foo`.
+  cleaned = cleaned.replace(/-\.+-/g, '-').replace(/-\.+|\.+-/g, '-');
+  // Trim leading/trailing dots and dashes.
+  cleaned = cleaned.replace(/^[.\-]+|[.\-]+$/g, '');
+  // Collapse runs of dashes left behind.
+  cleaned = cleaned.replace(/-+/g, '-');
+  return cleaned || 'unversioned';
+}
+
+/**
  * Detect repository shape from the on-disk apm.yml layout.
  *
  *   aggregator    -- top-level apm.yml + plugins subdir siblings.
@@ -252,13 +283,18 @@ export async function runGate(
 /**
  * Pack a single package: `cd <dir> && apm pack --offline --archive -o <dist>`.
  * Returns the absolute path to the produced .tar.gz.
+ *
+ * Selects the produced tarball by mtime (newest after pack) rather than
+ * diffing the directory before/after. This is robust to the case where
+ * `apm pack` overwrites an existing tarball of the same name -- the diff
+ * approach would see fresh=[] and incorrectly throw despite pack succeeding.
  */
 export async function packPackage(
   dir: string,
   distDir: string,
 ): Promise<string> {
   fs.mkdirSync(distDir, { recursive: true });
-  const before = listTarballs(distDir);
+  const packStartMs = Date.now();
   const rc = await exec.exec('apm', [
     'pack',
     '--offline',
@@ -269,12 +305,21 @@ export async function packPackage(
     throw new Error(`apm pack failed for ${dir} (exit ${rc})`);
   }
   const after = listTarballs(distDir);
-  const fresh = after.filter(p => !before.includes(p));
-  if (fresh.length === 0) {
+  if (after.length === 0) {
     throw new Error(
       `apm pack in ${dir} succeeded but produced no .tar.gz in ${distDir}. `
       + `Verify that the package has a 'dependencies:' block or primitives `
       + `to bundle.`,
+    );
+  }
+  // listTarballs sorts newest-first by mtime. Accept the newest tarball
+  // whose mtime is >= packStart (1s grace for fs mtime granularity).
+  const graceMs = packStartMs - 1000;
+  const fresh = after.filter(p => fs.statSync(p).mtimeMs >= graceMs);
+  if (fresh.length === 0) {
+    throw new Error(
+      `apm pack in ${dir} succeeded but no tarball in ${distDir} has an `
+      + `mtime newer than the pack invocation. Filesystem clock skew?`,
     );
   }
   if (fresh.length > 1) {
@@ -447,9 +492,12 @@ export async function runReleaseMode(opts: ReleaseOptions): Promise<ReleaseResul
 
   // 3. Stage marketplace.json (aggregator only, typically)
   // Pick the highest semver-ish version among packages for the suffix when
-  // there is no top-level package; fall back to the tag.
-  const marketplaceVersion =
+  // there is no top-level package; fall back to the tag. Sanitize because
+  // git tags can include `/`, `..` and other path-delimiter bytes that
+  // would let an attacker-controlled tag escape distDir.
+  const rawVersion =
     tag.replace(/^v/i, '') || results.map(r => r.version).sort().pop() || 'unversioned';
+  const marketplaceVersion = sanitizeTagForPath(rawVersion);
   const marketplacePath = stageMarketplaceJson(workingDir, distDir, marketplaceVersion);
 
   // 4. Step summary (best-effort; never fails the run)
@@ -477,8 +525,11 @@ export async function runReleaseMode(opts: ReleaseOptions): Promise<ReleaseResul
     if (marketplacePath) files.push(marketplacePath);
 
     // Write notes to a tmp file so we don't fight `gh`'s argument escaping
-    // for multi-line content.
-    const notesFile = path.join(distDir, `.release-notes-${tag}.md`);
+    // for multi-line content. Sanitize the tag for the filename only --
+    // git tags can contain `/` or `..`; the original `tag` value is still
+    // passed to `gh release create` below so the actual release is created
+    // against the real ref.
+    const notesFile = path.join(distDir, `.release-notes-${sanitizeTagForPath(tag)}.md`);
     fs.writeFileSync(notesFile, notes);
 
     const ghArgs = ['release', 'create', tag, '--notes-file', notesFile];

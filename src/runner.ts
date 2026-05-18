@@ -98,6 +98,11 @@ export async function run(): Promise<void> {
     const packInput = core.getInput('pack') === 'true';
     const isolated = core.getInput('isolated') === 'true';
 
+    // Default `packages` output to '[]' so downstream `fromJSON()` steps
+    // can parse it unconditionally regardless of mode. mode: release
+    // overwrites this with the actual JSON array of packed artifacts.
+    core.setOutput('packages', '[]');
+
     // MODE DISPATCH (umbrella orchestration). When `mode` is set, it
     // supersedes pack/bundle/setup-only/etc. -- the mode runs its own
     // fixed pipeline. Mutual-exclusion guard runs first so a misconfigured
@@ -128,8 +133,16 @@ export async function run(): Promise<void> {
       const ghToken = core.getInput('github-token');
       if (ghToken) {
         core.setSecret(ghToken);
+        // Mirror the classic-path precedence rules (see lines 214-224
+        // below). APM's resolver prefers GITHUB_APM_PAT > GITHUB_TOKEN, so
+        // unconditionally writing GITHUB_APM_PAT here would silently shadow
+        // a caller-supplied GITHUB_TOKEN (e.g. a cross-org PAT set via
+        // step-level env:). Capture the pre-call state first.
+        const callerProvidedToken = !!process.env.GITHUB_TOKEN;
         if (!process.env.GITHUB_TOKEN) process.env.GITHUB_TOKEN = ghToken;
-        if (!process.env.GITHUB_APM_PAT) process.env.GITHUB_APM_PAT = ghToken;
+        if (!callerProvidedToken) {
+          process.env.GITHUB_APM_PAT ??= ghToken;
+        }
       }
 
       fs.mkdirSync(resolvedDir, { recursive: true });

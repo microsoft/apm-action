@@ -41,6 +41,22 @@ type RepoShape = 'aggregator' | 'single-plugin';
  */
 export declare function resolveReleaseTag(inputTag: string, envRefName: string | undefined): string;
 /**
+ * Sanitize a release tag for safe use in a file or directory name.
+ *
+ * Git tag names can legally include `/`, `..`, control characters, and
+ * other path-delimiter bytes (the Git ref grammar bans only a small
+ * subset). Using a raw tag inside `path.join(...)` can write outside the
+ * intended dist/ tree (path traversal) or create unintended subdirs.
+ *
+ * Allow only `[A-Za-z0-9._-]`; collapse every other byte to `-`. Strip
+ * leading dots so the result cannot be `..` or `.hidden`. Empty input
+ * (or input that sanitizes to empty) returns `unversioned`.
+ *
+ * IMPORTANT: callers must still pass the ORIGINAL tag to `gh release create`
+ * -- sanitization is purely for local filesystem paths.
+ */
+export declare function sanitizeTagForPath(tag: string): string;
+/**
  * Detect repository shape from the on-disk apm.yml layout.
  *
  *   aggregator    -- top-level apm.yml + plugins subdir siblings.
@@ -83,6 +99,11 @@ export declare function runGate(workingDir: string): Promise<{
 /**
  * Pack a single package: `cd <dir> && apm pack --offline --archive -o <dist>`.
  * Returns the absolute path to the produced .tar.gz.
+ *
+ * Selects the produced tarball by mtime (newest after pack) rather than
+ * diffing the directory before/after. This is robust to the case where
+ * `apm pack` overwrites an existing tarball of the same name -- the diff
+ * approach would see fresh=[] and incorrectly throw despite pack succeeding.
  */
 export declare function packPackage(dir: string, distDir: string): Promise<string>;
 /**

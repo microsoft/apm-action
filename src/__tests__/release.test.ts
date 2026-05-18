@@ -37,6 +37,7 @@ jest.unstable_mockModule('@actions/exec', () => ({
 
 const {
   resolveReleaseTag,
+  sanitizeTagForPath,
   detectShape,
   discoverPackages,
   resolvePrerelease,
@@ -56,6 +57,34 @@ describe('resolveReleaseTag', () => {
   });
   it('throws when both empty', () => {
     expect(() => resolveReleaseTag('', undefined)).toThrow(/release-tag/);
+  });
+});
+
+describe('sanitizeTagForPath', () => {
+  it('passes safe tags through unchanged', () => {
+    expect(sanitizeTagForPath('v1.2.3')).toBe('v1.2.3');
+    expect(sanitizeTagForPath('1.0.0-rc.1')).toBe('1.0.0-rc.1');
+    expect(sanitizeTagForPath('my-pkg_v2')).toBe('my-pkg_v2');
+  });
+  it('replaces path separators with dashes (path traversal defense)', () => {
+    expect(sanitizeTagForPath('../../etc/passwd')).toBe('etc-passwd');
+    expect(sanitizeTagForPath('release/v1')).toBe('release-v1');
+    expect(sanitizeTagForPath('v1/../v2')).toBe('v1-v2');
+  });
+  it('strips leading dots so result cannot be ".." or ".hidden"', () => {
+    expect(sanitizeTagForPath('..')).toBe('unversioned');
+    expect(sanitizeTagForPath('.hidden')).toBe('hidden');
+    expect(sanitizeTagForPath('...v1')).toBe('v1');
+  });
+  it('strips control characters and other delimiters', () => {
+    expect(sanitizeTagForPath('v1\u0000.0')).toBe('v1-0');
+    expect(sanitizeTagForPath('v1\n2')).toBe('v1-2');
+    expect(sanitizeTagForPath('v1\\..\\v2')).toBe('v1-v2');
+  });
+  it('returns "unversioned" for empty or pathological input', () => {
+    expect(sanitizeTagForPath('')).toBe('unversioned');
+    expect(sanitizeTagForPath('///')).toBe('unversioned');
+    expect(sanitizeTagForPath('---')).toBe('unversioned');
   });
 });
 
@@ -269,6 +298,27 @@ describe('packPackage', () => {
   it('throws when no tarball produced', async () => {
     mockExec.mockImplementationOnce(async () => 0);
     await expect(packPackage(tmpDir, distDir)).rejects.toThrow(/produced no \.tar\.gz/);
+  });
+
+  it('returns the tarball even when apm pack overwrites an existing file of the same name (regression)', async () => {
+    // Simulate a re-run where distDir already contains last invocation's
+    // output. Old before/after-diff logic would see fresh=[] and throw
+    // despite pack succeeding. mtime-based selection must accept the
+    // overwritten file.
+    fs.mkdirSync(distDir, { recursive: true });
+    const tarballPath = path.join(distDir, 'mypkg-1.0.0.tar.gz');
+    fs.writeFileSync(tarballPath, 'stale');
+    // Backdate the existing file so the overwrite produces a newer mtime.
+    const oldMtime = new Date(Date.now() - 60_000);
+    fs.utimesSync(tarballPath, oldMtime, oldMtime);
+
+    mockExec.mockImplementationOnce(async () => {
+      fs.writeFileSync(tarballPath, 'fresh');
+      return 0;
+    });
+    const result = await packPackage(tmpDir, distDir);
+    expect(result).toBe(tarballPath);
+    expect(fs.readFileSync(tarballPath, 'utf8')).toBe('fresh');
   });
 });
 

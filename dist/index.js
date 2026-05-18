@@ -41748,6 +41748,36 @@ function resolveReleaseTag(inputTag, envRefName) {
         + `the workflow on a tag push (on.push.tags).`);
 }
 /**
+ * Sanitize a release tag for safe use in a file or directory name.
+ *
+ * Git tag names can legally include `/`, `..`, control characters, and
+ * other path-delimiter bytes (the Git ref grammar bans only a small
+ * subset). Using a raw tag inside `path.join(...)` can write outside the
+ * intended dist/ tree (path traversal) or create unintended subdirs.
+ *
+ * Allow only `[A-Za-z0-9._-]`; collapse every other byte to `-`. Strip
+ * leading dots so the result cannot be `..` or `.hidden`. Empty input
+ * (or input that sanitizes to empty) returns `unversioned`.
+ *
+ * IMPORTANT: callers must still pass the ORIGINAL tag to `gh release create`
+ * -- sanitization is purely for local filesystem paths.
+ */
+function sanitizeTagForPath(tag) {
+    let cleaned = (tag ?? '')
+        .replace(/[^A-Za-z0-9._-]+/g, '-');
+    // Collapse runs of dots (`..`, `...`) -- they have no legitimate use
+    // in a version string and produce ugly filenames. Defense-in-depth.
+    cleaned = cleaned.replace(/\.{2,}/g, '.');
+    // Drop dots and dashes adjacent to separators so `v1-.-v2` becomes
+    // `v1-v2` and `..-foo` becomes `foo`.
+    cleaned = cleaned.replace(/-\.+-/g, '-').replace(/-\.+|\.+-/g, '-');
+    // Trim leading/trailing dots and dashes.
+    cleaned = cleaned.replace(/^[.\-]+|[.\-]+$/g, '');
+    // Collapse runs of dashes left behind.
+    cleaned = cleaned.replace(/-+/g, '-');
+    return cleaned || 'unversioned';
+}
+/**
  * Detect repository shape from the on-disk apm.yml layout.
  *
  *   aggregator    -- top-level apm.yml + plugins subdir siblings.
@@ -41918,10 +41948,15 @@ async function runGate(workingDir) {
 /**
  * Pack a single package: `cd <dir> && apm pack --offline --archive -o <dist>`.
  * Returns the absolute path to the produced .tar.gz.
+ *
+ * Selects the produced tarball by mtime (newest after pack) rather than
+ * diffing the directory before/after. This is robust to the case where
+ * `apm pack` overwrites an existing tarball of the same name -- the diff
+ * approach would see fresh=[] and incorrectly throw despite pack succeeding.
  */
 async function packPackage(dir, distDir) {
     external_node_fs_namespaceObject.mkdirSync(distDir, { recursive: true });
-    const before = listTarballs(distDir);
+    const packStartMs = Date.now();
     const rc = await lib_exec/* exec */.m('apm', [
         'pack',
         '--offline',
@@ -41932,11 +41967,18 @@ async function packPackage(dir, distDir) {
         throw new Error(`apm pack failed for ${dir} (exit ${rc})`);
     }
     const after = listTarballs(distDir);
-    const fresh = after.filter(p => !before.includes(p));
-    if (fresh.length === 0) {
+    if (after.length === 0) {
         throw new Error(`apm pack in ${dir} succeeded but produced no .tar.gz in ${distDir}. `
             + `Verify that the package has a 'dependencies:' block or primitives `
             + `to bundle.`);
+    }
+    // listTarballs sorts newest-first by mtime. Accept the newest tarball
+    // whose mtime is >= packStart (1s grace for fs mtime granularity).
+    const graceMs = packStartMs - 1000;
+    const fresh = after.filter(p => external_node_fs_namespaceObject.statSync(p).mtimeMs >= graceMs);
+    if (fresh.length === 0) {
+        throw new Error(`apm pack in ${dir} succeeded but no tarball in ${distDir} has an `
+            + `mtime newer than the pack invocation. Filesystem clock skew?`);
     }
     if (fresh.length > 1) {
         lib_core/* warning */.$e(`apm pack in ${dir} produced ${fresh.length} tarballs; expected 1. `
@@ -42080,8 +42122,11 @@ async function runReleaseMode(opts) {
     }
     // 3. Stage marketplace.json (aggregator only, typically)
     // Pick the highest semver-ish version among packages for the suffix when
-    // there is no top-level package; fall back to the tag.
-    const marketplaceVersion = tag.replace(/^v/i, '') || results.map(r => r.version).sort().pop() || 'unversioned';
+    // there is no top-level package; fall back to the tag. Sanitize because
+    // git tags can include `/`, `..` and other path-delimiter bytes that
+    // would let an attacker-controlled tag escape distDir.
+    const rawVersion = tag.replace(/^v/i, '') || results.map(r => r.version).sort().pop() || 'unversioned';
+    const marketplaceVersion = sanitizeTagForPath(rawVersion);
     const marketplacePath = stageMarketplaceJson(workingDir, distDir, marketplaceVersion);
     // 4. Step summary (best-effort; never fails the run)
     try {
@@ -42107,8 +42152,11 @@ async function runReleaseMode(opts) {
         if (marketplacePath)
             files.push(marketplacePath);
         // Write notes to a tmp file so we don't fight `gh`'s argument escaping
-        // for multi-line content.
-        const notesFile = external_node_path_namespaceObject.join(distDir, `.release-notes-${tag}.md`);
+        // for multi-line content. Sanitize the tag for the filename only --
+        // git tags can contain `/` or `..`; the original `tag` value is still
+        // passed to `gh release create` below so the actual release is created
+        // against the real ref.
+        const notesFile = external_node_path_namespaceObject.join(distDir, `.release-notes-${sanitizeTagForPath(tag)}.md`);
         external_node_fs_namespaceObject.writeFileSync(notesFile, notes);
         const ghArgs = ['release', 'create', tag, '--notes-file', notesFile];
         if (opts.releaseName.trim()) {
@@ -42239,6 +42287,10 @@ async function run() {
         const bundlesFileInput = lib_core/* getInput */.V4('bundles-file').trim();
         const packInput = lib_core/* getInput */.V4('pack') === 'true';
         const isolated = lib_core/* getInput */.V4('isolated') === 'true';
+        // Default `packages` output to '[]' so downstream `fromJSON()` steps
+        // can parse it unconditionally regardless of mode. mode: release
+        // overwrites this with the actual JSON array of packed artifacts.
+        lib_core/* setOutput */.uH('packages', '[]');
         // MODE DISPATCH (umbrella orchestration). When `mode` is set, it
         // supersedes pack/bundle/setup-only/etc. -- the mode runs its own
         // fixed pipeline. Mutual-exclusion guard runs first so a misconfigured
@@ -42268,10 +42320,17 @@ async function run() {
             const ghToken = lib_core/* getInput */.V4('github-token');
             if (ghToken) {
                 lib_core/* setSecret */.Pq(ghToken);
+                // Mirror the classic-path precedence rules (see lines 214-224
+                // below). APM's resolver prefers GITHUB_APM_PAT > GITHUB_TOKEN, so
+                // unconditionally writing GITHUB_APM_PAT here would silently shadow
+                // a caller-supplied GITHUB_TOKEN (e.g. a cross-org PAT set via
+                // step-level env:). Capture the pre-call state first.
+                const callerProvidedToken = !!process.env.GITHUB_TOKEN;
                 if (!process.env.GITHUB_TOKEN)
                     process.env.GITHUB_TOKEN = ghToken;
-                if (!process.env.GITHUB_APM_PAT)
-                    process.env.GITHUB_APM_PAT = ghToken;
+                if (!callerProvidedToken) {
+                    process.env.GITHUB_APM_PAT ??= ghToken;
+                }
             }
             external_fs_.mkdirSync(resolvedDir, { recursive: true });
             // Mode pipelines require the APM CLI; install + record the resolved
