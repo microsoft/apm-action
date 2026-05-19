@@ -10,14 +10,20 @@ The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-05-18
+
 ### Added
 
 - **`mode: release` umbrella for tag-triggered releases** ([microsoft/apm#1348]). A single input collapses the release pipeline into one step: gate (`apm pack --check-versions --check-clean --json`), per-package matrix pack with sha256 sidecars, marketplace.json drift detection, GH Step Summary, and `gh release create` publish. The CLI primitives underneath stay vendor-neutral — the equivalent shell recipe works unchanged on GitLab CI, Jenkins, and Azure DevOps (see `producer/releasing-from-any-ci.md`).
   - New inputs (all optional): `mode` (`release`), `release-tag`, `release-name`, `release-notes`, `release-draft`, `release-prerelease` (`true`/`false`/`auto` — auto-detects from `-rc`/`-alpha`/`-beta`/`-pre` in the tag), `release-skip-publish` (dry-run for CI / e2e).
   - New outputs: `packages` (JSON array of `{name, version, bundle, sha256, sha256_path}`), `marketplace-drift` (`true`/`false`), `release-url`, `release-tag`. Outside `mode: release` the `packages` output is always set to `'[]'` so downstream `fromJSON()` steps work unconditionally.
   - Mutually exclusive with the classic dispatch inputs (`pack`, `bundle`, `bundles-file`, `setup-only`); setting any combination fails fast with a single consolidated error.
-  - Requires `apm` >= 0.14.0 on PATH for the `--check-versions` / `--check-clean` gate; below 0.14 the gate exits non-zero with a generic message.
+  - Requires `apm` >= 0.14.0 on PATH for the `--check-versions` / `--check-clean` gate; the default `apm-version` is pinned to `0.14.0` so the umbrella is functional out of the box.
   - Reference workflow: `tests/fixtures/release/` (aggregator + single-plugin shapes).
+
+### Changed
+
+- **`apm-version` default bumped to `0.14.0`** (was `0.13.0`). Picks up the v0.14.0 release: `apm pack --check-versions` / `--check-clean` release gates (required by `mode: release`), `apm plugin init` noun-verb surface, `apm pack` multi-format outputs (`--marketplace`, `--marketplace-path`, `--json`, `marketplace.outputs` map form), `apm marketplace doctor` version-alignment + format-coverage rows, and the breaking MCP Registry v0.1 client (self-hosted registries must serve `/v0.1/` paths). Consumers pinning `apm-version` explicitly are unaffected.
 
 
 ## [1.8.0] - 2026-05-18
@@ -222,7 +228,8 @@ Initial public release.
 - **Marketplace name set to "Setup APM"** ([#5]).
 - **Microsoft OSS compliance baseline.** SECURITY.md ([#2]), CODEOWNERS, license, contributing guide, code of conduct, and CI pipeline.
 
-[Unreleased]: https://github.com/microsoft/apm-action/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/microsoft/apm-action/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/microsoft/apm-action/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/microsoft/apm-action/compare/v1.7.3...v1.8.0
 [1.7.3]: https://github.com/microsoft/apm-action/compare/v1.7.2...v1.7.3
 [1.7.2]: https://github.com/microsoft/apm-action/compare/v1.7.1...v1.7.2
