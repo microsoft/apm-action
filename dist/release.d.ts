@@ -100,10 +100,17 @@ export declare function runGate(workingDir: string): Promise<{
  * Pack a single package: `cd <dir> && apm pack --offline --archive -o <dist>`.
  * Returns the absolute path to the produced .tar.gz.
  *
- * Selects the produced tarball by mtime (newest after pack) rather than
- * diffing the directory before/after. This is robust to the case where
- * `apm pack` overwrites an existing tarball of the same name -- the diff
- * approach would see fresh=[] and incorrectly throw despite pack succeeding.
+ * Identifies the produced tarball by snapshotting `distDir` before and after
+ * the pack invocation. A tarball is "produced by this call" if it is new in
+ * `after`, or if it existed in `before` but its mtime advanced. This is
+ * correct under two conditions a naive mtime heuristic gets wrong:
+ *
+ *   1. Monorepo runs share `distDir`. Sequential per-package pack invocations
+ *      complete in <1s each, so prior tarballs from the same run fall inside
+ *      any reasonable "newer than packStart" grace window. The before/after
+ *      diff isolates exactly the tarball this invocation touched.
+ *   2. Re-runs overwrite an existing tarball of the same name. A pure
+ *      set-difference would miss this; mtime advance catches it.
  */
 export declare function packPackage(dir: string, distDir: string): Promise<string>;
 /**

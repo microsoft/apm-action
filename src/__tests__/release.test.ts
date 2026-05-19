@@ -320,6 +320,30 @@ describe('packPackage', () => {
     expect(result).toBe(tarballPath);
     expect(fs.readFileSync(tarballPath, 'utf8')).toBe('fresh');
   });
+
+  it('returns only the tarball produced by this invocation in a shared distDir (monorepo regression)', async () => {
+    // Simulate a monorepo loop: distDir already contains prior packages'
+    // tarballs from THIS run (mtime just a few ms ago). A mtime-grace-window
+    // heuristic would classify them all as "fresh" and emit a spurious
+    // "produced N tarballs; expected 1" warning. The before/after diff
+    // must isolate only the file this invocation actually touched.
+    fs.mkdirSync(distDir, { recursive: true });
+    const priorA = path.join(distDir, 'sibling-a-1.0.0.tar.gz');
+    const priorB = path.join(distDir, 'sibling-b-1.0.0.tar.gz');
+    fs.writeFileSync(priorA, 'a');
+    fs.writeFileSync(priorB, 'b');
+
+    const newTarball = path.join(distDir, 'mypkg-1.0.0.tar.gz');
+    mockExec.mockImplementationOnce(async () => {
+      fs.writeFileSync(newTarball, 'new');
+      return 0;
+    });
+    const result = await packPackage(tmpDir, distDir);
+    expect(result).toBe(newTarball);
+    // Sibling files must still exist on disk (we did not delete them).
+    expect(fs.existsSync(priorA)).toBe(true);
+    expect(fs.existsSync(priorB)).toBe(true);
+  });
 });
 
 describe('runReleaseMode (integration, mocked exec)', () => {

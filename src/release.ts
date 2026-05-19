@@ -284,17 +284,27 @@ export async function runGate(
  * Pack a single package: `cd <dir> && apm pack --offline --archive -o <dist>`.
  * Returns the absolute path to the produced .tar.gz.
  *
- * Selects the produced tarball by mtime (newest after pack) rather than
- * diffing the directory before/after. This is robust to the case where
- * `apm pack` overwrites an existing tarball of the same name -- the diff
- * approach would see fresh=[] and incorrectly throw despite pack succeeding.
+ * Identifies the produced tarball by snapshotting `distDir` before and after
+ * the pack invocation. A tarball is "produced by this call" if it is new in
+ * `after`, or if it existed in `before` but its mtime advanced. This is
+ * correct under two conditions a naive mtime heuristic gets wrong:
+ *
+ *   1. Monorepo runs share `distDir`. Sequential per-package pack invocations
+ *      complete in <1s each, so prior tarballs from the same run fall inside
+ *      any reasonable "newer than packStart" grace window. The before/after
+ *      diff isolates exactly the tarball this invocation touched.
+ *   2. Re-runs overwrite an existing tarball of the same name. A pure
+ *      set-difference would miss this; mtime advance catches it.
  */
 export async function packPackage(
   dir: string,
   distDir: string,
 ): Promise<string> {
   fs.mkdirSync(distDir, { recursive: true });
-  const packStartMs = Date.now();
+  const before = new Map<string, number>();
+  for (const p of listTarballs(distDir)) {
+    before.set(p, fs.statSync(p).mtimeMs);
+  }
   const rc = await exec.exec('apm', [
     'pack',
     '--offline',
@@ -312,23 +322,28 @@ export async function packPackage(
       + `to bundle.`,
     );
   }
-  // listTarballs sorts newest-first by mtime. Accept the newest tarball
-  // whose mtime is >= packStart (1s grace for fs mtime granularity).
-  const graceMs = packStartMs - 1000;
-  const fresh = after.filter(p => fs.statSync(p).mtimeMs >= graceMs);
-  if (fresh.length === 0) {
+  const touched = after.filter(p => {
+    const prev = before.get(p);
+    if (prev === undefined) return true;
+    return fs.statSync(p).mtimeMs > prev;
+  });
+  if (touched.length === 0) {
     throw new Error(
-      `apm pack in ${dir} succeeded but no tarball in ${distDir} has an `
-      + `mtime newer than the pack invocation. Filesystem clock skew?`,
+      `apm pack in ${dir} succeeded but no tarball in ${distDir} was added `
+      + `or modified by this invocation. Filesystem clock skew?`,
     );
   }
-  if (fresh.length > 1) {
+  if (touched.length > 1) {
+    // One pack invocation is expected to produce or modify exactly one
+    // tarball. More than one is a real producer-side anomaly worth surfacing
+    // -- the before/after diff has already filtered out prior packages in
+    // the same monorepo run.
     core.warning(
-      `apm pack in ${dir} produced ${fresh.length} tarballs; expected 1. `
-      + `Using the most recently modified: ${fresh[0]}`,
+      `apm pack in ${dir} produced ${touched.length} tarballs; expected 1. `
+      + `Using the most recently modified: ${touched.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0]}`,
     );
   }
-  return fresh[0];
+  return touched.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
 }
 
 function listTarballs(dir: string): string[] {

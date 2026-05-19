@@ -1,6 +1,6 @@
 {
   "name": "apm-action",
-  "version": "1.0.0",
+  "version": "1.9.1",
   "description": "GitHub Action for APM - Agent Package Manager",
   "type": "module",
   "main": "dist/index.js",
