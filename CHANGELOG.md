@@ -10,6 +10,12 @@ The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-05-19
+
+### Fixed
+
+- **Spurious "produced N tarballs; expected 1" warnings in monorepo releases** ([microsoft/apm#1348]). `packPackage` snapshotted the shared `distDir` only after `apm pack` returned and treated any tarball with `mtime >= packStart - 1s` as "fresh by this invocation." In a monorepo loop, sequential per-package packs complete in well under a second, so plugin N saw plugin 1..N-1's tarballs inside the grace window and warned on every pack after the first. Fix: snapshot tarballs and their mtimes before the pack call and accept only files that are new in `after` or whose mtime advanced — the warning now fires only on a genuine producer-side anomaly. Empirically reproduced on [DevExpGbb/zava-agent-config@v6.1.1](https://github.com/DevExpGbb/zava-agent-config/releases/tag/v6.1.1) ([run 26079513903](https://github.com/DevExpGbb/zava-agent-config/actions/runs/26079513903)), which packs 7 plugins from one `dist/` and emitted 6 spurious warnings per release.
+
 ## [1.9.0] - 2026-05-18
 
 ### Added
@@ -228,7 +234,8 @@ Initial public release.
 - **Marketplace name set to "Setup APM"** ([#5]).
 - **Microsoft OSS compliance baseline.** SECURITY.md ([#2]), CODEOWNERS, license, contributing guide, code of conduct, and CI pipeline.
 
-[Unreleased]: https://github.com/microsoft/apm-action/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/microsoft/apm-action/compare/v1.9.1...HEAD
+[1.9.1]: https://github.com/microsoft/apm-action/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/microsoft/apm-action/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/microsoft/apm-action/compare/v1.7.3...v1.8.0
 [1.7.3]: https://github.com/microsoft/apm-action/compare/v1.7.2...v1.7.3
