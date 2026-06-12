@@ -35,7 +35,7 @@ inputs:
     required: false
     default: 'false'
   pack:
-    description: 'Pack a bundle after install. Format is controlled by `bundle-format` (default: apm). Produces .tar.gz by default.'
+    description: 'Pack a bundle after install. Format is controlled by `bundle-format` (default: apm). Archived output is .zip by default (apm 0.20+); older CLIs emit .tar.gz. Both are accepted on restore.'
     required: false
     default: 'false'
   bundle-format:
@@ -57,9 +57,9 @@ inputs:
   bundles-file:
     description: |
       Path to a UTF-8 text file with one bundle path per line (paths must end
-      in '.tar.gz'). Lines starting with '#' are comments; blank lines are
-      ignored. Glob patterns are NOT expanded -- generate the list yourself
-      with 'find ... | sort' or equivalent.
+      in '.zip' or '.tar.gz'). Lines starting with '#' are comments; blank
+      lines are ignored. Glob patterns are NOT expanded -- generate the list
+      yourself with 'find ... | sort' or equivalent.
       Bundles are restored in caller-specified order (later bundles win on
       file collisions; the action emits a warning before the loop runs so
       the policy is explicit). Mutually exclusive with 'pack' and 'bundle'.
@@ -70,7 +70,7 @@ inputs:
     required: false
     default: ''
   archive:
-    description: 'Produce .tar.gz instead of directory (used with pack: true)'
+    description: 'Produce a single-file archive instead of a directory (used with pack: true). The archive is .zip by default on apm 0.20+ (.tar.gz on older CLIs); both extensions are recognized.'
     required: false
     default: 'true'
   marketplace:

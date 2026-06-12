@@ -12,8 +12,8 @@ export declare function resolveLocalBundle(pattern: string, workspaceDir: string
 /**
  * Inspect a bundle archive to determine its format without extracting it.
  *
- * Reads the tar table-of-contents (`tar tzf`) and looks for the format
- * markers:
+ * Reads the archive table-of-contents (format-aware: `tar tzf` for .tar.gz,
+ * `unzip -Z1` for .zip) and looks for the format markers:
  *   - APM bundle: `apm.lock.yaml` (lockfile-driven, .github/.claude trees)
  *   - Plugin bundle: `plugin.json` at the bundle root (Claude Code marketplace
  *     layout, flat agents/skills/commands/instructions/ dirs, no lockfile)

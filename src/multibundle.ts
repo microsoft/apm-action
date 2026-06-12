@@ -105,9 +105,9 @@ export function buildStrippedEnv(): Record<string, string> {
  * - '..' segment in any path -> reject with line number (B3).
  * - Relative paths resolved against opts.workspaceDir; rejected if they escape it (B1).
  * - Absolute paths allowed (matches existing bundle: behaviour, B1).
- * - Each entry must end in `.tar.gz` (defence-in-depth + clear early failure
- *   if a user accidentally points at a directory or wrong file). Glob patterns
- *   are NOT expanded; use `find ... | sort` to generate the list yourself.
+ * - Each entry must end in `.zip` or `.tar.gz` (defence-in-depth + clear early
+ *   failure if a user accidentally points at a directory or wrong file). Glob
+ *   patterns are NOT expanded; use `find ... | sort` to generate the list.
  * - Empty list after stripping -> hard error.
  * - Duplicates deduped silently (first occurrence wins).
  * - Cap at opts.maxBundles (default 64, env APM_MAX_BUNDLES) (B5).
@@ -169,12 +169,14 @@ export function parseBundleListFile(filePath: string, opts?: ParseOptions): stri
       );
     }
 
-    // Require .tar.gz extension. Globs are not expanded; bare paths only.
-    // Catches mis-configured list files (typo, directory, or wildcard left
+    // Require a recognized archive extension (.zip default on apm 0.20+, or
+    // legacy .tar.gz). Globs are not expanded; bare paths only. Catches
+    // mis-configured list files (typo, directory, or wildcard left
     // unexpanded) at parse time rather than surfacing as a confusing tar error.
-    if (!trimmed.toLowerCase().endsWith('.tar.gz')) {
+    const lower = trimmed.toLowerCase();
+    if (!lower.endsWith('.zip') && !lower.endsWith('.tar.gz')) {
       throw new Error(
-        `bundles-file line ${lineNum}: entry must end in '.tar.gz' `
+        `bundles-file line ${lineNum}: entry must end in '.zip' or '.tar.gz' `
         + `(globs are not expanded; use find or ls to generate the list): ${trimmed}`,
       );
     }

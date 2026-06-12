@@ -175,24 +175,32 @@ describe('parseBundleListFile', () => {
       .toThrow(/empty after stripping/);
   });
 
-  it('rejects entries that do not end in .tar.gz with line number', () => {
+  it('rejects entries that are not a recognized archive extension with line number', () => {
     const ok = path.join(workspaceDir, 'ok.tar.gz');
-    fs.writeFileSync(listFile, [ok, 'bundle.zip'].join('\n'));
+    fs.writeFileSync(listFile, [ok, 'bundle.txt'].join('\n'));
     expect(() => parseBundleListFile(listFile, { workspaceDir }))
-      .toThrow(/line 2: entry must end in '\.tar\.gz'.*bundle\.zip/);
+      .toThrow(/line 2: entry must end in '\.zip' or '\.tar\.gz'.*bundle\.txt/);
+  });
+
+  it('accepts .zip entries (apm 0.20+ default archive format)', () => {
+    const tar = path.join(workspaceDir, 'legacy.tar.gz');
+    const zip = path.join(workspaceDir, 'modern.zip');
+    fs.writeFileSync(listFile, [tar, zip].join('\n'));
+    const result = parseBundleListFile(listFile, { workspaceDir });
+    expect(result).toEqual([tar, zip]);
   });
 
   it("rejects glob patterns left unexpanded (no shell expansion)", () => {
     fs.writeFileSync(listFile, '/tmp/bundles/*.tar.gz\n');
     // The glob is not a literal .tar.gz file path either (the workspace check
     // on a literal '*' character is tolerated; the extension check would pass
-    // since the suffix is .tar.gz). Globs that DON'T end in .tar.gz are caught
-    // here; literal '*'-suffix paths are caught at unpack time by the OS.
-    // This test pins the wildcard-without-extension case which is the common
-    // user mistake (e.g. '/tmp/bundles/*').
+    // since the suffix is .tar.gz). Globs that DON'T end in an archive
+    // extension are caught here; literal '*'-suffix paths are caught at
+    // unpack time by the OS. This test pins the wildcard-without-extension
+    // case which is the common user mistake (e.g. '/tmp/bundles/*').
     fs.writeFileSync(listFile, '/tmp/bundles/*\n');
     expect(() => parseBundleListFile(listFile, { workspaceDir }))
-      .toThrow(/entry must end in '\.tar\.gz'/);
+      .toThrow(/entry must end in '\.zip' or '\.tar\.gz'/);
   });
 });
 

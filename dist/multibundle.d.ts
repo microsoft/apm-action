@@ -68,9 +68,9 @@ export declare function buildStrippedEnv(): Record<string, string>;
  * - '..' segment in any path -> reject with line number (B3).
  * - Relative paths resolved against opts.workspaceDir; rejected if they escape it (B1).
  * - Absolute paths allowed (matches existing bundle: behaviour, B1).
- * - Each entry must end in `.tar.gz` (defence-in-depth + clear early failure
- *   if a user accidentally points at a directory or wrong file). Glob patterns
- *   are NOT expanded; use `find ... | sort` to generate the list yourself.
+ * - Each entry must end in `.zip` or `.tar.gz` (defence-in-depth + clear early
+ *   failure if a user accidentally points at a directory or wrong file). Glob
+ *   patterns are NOT expanded; use `find ... | sort` to generate the list.
  * - Empty list after stripping -> hard error.
  * - Duplicates deduped silently (first occurrence wins).
  * - Cap at opts.maxBundles (default 64, env APM_MAX_BUNDLES) (B5).
