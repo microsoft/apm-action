@@ -249,13 +249,32 @@ describe('runPackStep', () => {
     expect(result.bundlePath).toContain('test-pkg-1.0.0');
   });
 
+  it('detects a .zip bundle in archive mode (apm pack default changed to zip)', async () => {
+    fs.writeFileSync(path.join(buildDir, 'inline-workflow-1.0.0.zip'), 'fake');
+    mockExec.mockResolvedValue(0);
+
+    const result = await runPackStep(tmpDir, { archive: true, format: 'apm' });
+
+    expect(result.bundlePath).toContain('inline-workflow-1.0.0.zip');
+    expect(result.format).toBe('apm');
+  });
+
+  it('still detects a .tar.gz bundle in archive mode (tar.gz opt-out remains supported)', async () => {
+    fs.writeFileSync(path.join(buildDir, 'test-pkg-1.0.0.tar.gz'), 'fake');
+    mockExec.mockResolvedValue(0);
+
+    const result = await runPackStep(tmpDir, { archive: true, format: 'apm' });
+
+    expect(result.bundlePath).toContain('test-pkg-1.0.0.tar.gz');
+  });
+
   it('throws when multiple archives found', async () => {
-    fs.writeFileSync(path.join(buildDir, 'pkg-a-1.0.tar.gz'), 'fake');
+    fs.writeFileSync(path.join(buildDir, 'pkg-a-1.0.zip'), 'fake');
     fs.writeFileSync(path.join(buildDir, 'pkg-b-2.0.tar.gz'), 'fake');
     mockExec.mockResolvedValue(0);
 
     await expect(runPackStep(tmpDir, { archive: true, format: 'apm' }))
-      .rejects.toThrow('Multiple .tar.gz archives found in build directory after apm pack');
+      .rejects.toThrow('Multiple archive bundles found in build directory after apm pack');
   });
 
   it('throws when multiple bundle directories found', async () => {

@@ -32904,7 +32904,9 @@ async function runPackStep(workingDir, opts) {
 }
 /**
  * Find the bundle output in the build directory.
- * For archives: look for .tar.gz files.
+ * For archives: look for .zip or .tar.gz files. `apm pack --archive` now
+ *   produces .zip by default; .tar.gz is still emitted via
+ *   `--archive-format tar.gz`, so both are accepted.
  * For directories: look for non-hidden directories.
  *
  * Returns null when the build directory is missing or contains no bundle
@@ -32923,12 +32925,15 @@ function findBundleOrNull(buildDir, archive) {
     }
     const entries = external_fs_.readdirSync(buildDir);
     if (archive) {
-        const archives = entries.filter(e => e.endsWith('.tar.gz')).sort();
+        // `apm pack --archive` now produces .zip by default (the CLI flipped its
+        // default from .tar.gz to .zip). tar.gz is still emitted when the caller
+        // opts in via `--archive-format tar.gz`, so detect both.
+        const archives = entries.filter(e => e.endsWith('.zip') || e.endsWith('.tar.gz')).sort();
         if (archives.length === 0) {
             return null;
         }
         if (archives.length > 1) {
-            throw new Error(`Multiple .tar.gz archives found in build directory after apm pack: ${archives.join(', ')}`);
+            throw new Error(`Multiple archive bundles found in build directory after apm pack: ${archives.join(', ')}`);
         }
         return external_path_.join(buildDir, archives[0]);
     }

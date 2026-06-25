@@ -35,7 +35,7 @@ inputs:
     required: false
     default: 'false'
   pack:
-    description: 'Pack a bundle after install. Format is controlled by `bundle-format` (default: apm). Produces .tar.gz by default.'
+    description: 'Pack a bundle after install. Format is controlled by `bundle-format` (default: apm). With `archive: true`, follows the apm CLI default and produces a .zip; .tar.gz remains supported via the CLI opt-out.'
     required: false
     default: 'false'
   bundle-format:
@@ -70,7 +70,7 @@ inputs:
     required: false
     default: ''
   archive:
-    description: 'Produce .tar.gz instead of directory (used with pack: true)'
+    description: 'Produce an archive bundle instead of a directory (used with pack: true). Follows the apm CLI default, which now produces .zip; .tar.gz is still supported.'
     required: false
     default: 'true'
   marketplace:
