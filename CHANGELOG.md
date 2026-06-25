@@ -10,6 +10,10 @@ The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 
 ## [Unreleased]
 
+### Added
+
+- **`update` input to refresh branch/tag dependency refs** ([microsoft/apm-action#46]). When `update: 'true'`, the action runs `apm update --yes` in place of `apm install`: it re-resolves every branch/tag dependency to its latest matching commit, rewrites `apm.lock.yaml`, and then proceeds with the normal post-install steps (`audit-report`, `compile`, `script`, `pack`). The default (`false`) keeps the reproducible install-from-lockfile behaviour. Closes the gap where branch-tracked deps (e.g. `github/awesome-copilot#main`) stayed frozen at the lockfile commit with no first-class way to refresh them — the previous workaround was a hand-rolled `script: "apm update --yes"`. Mutually exclusive with `isolated`, `setup-only`, `bundle`, `bundles-file`, and `mode`.
+
 ## [1.9.1] - 2026-05-19
 
 ### Fixed
@@ -88,6 +92,7 @@ APM v0.12.3 made harness detection strict (no more silent default-to-copilot). E
 [#33]: https://github.com/microsoft/apm-action/pull/33
 [#34]: https://github.com/microsoft/apm-action/pull/34
 
+[microsoft/apm-action#46]: https://github.com/microsoft/apm-action/issues/46
 [microsoft/apm#1348]: https://github.com/microsoft/apm/issues/1348
 
 ## [1.6.0] - 2026-05-02

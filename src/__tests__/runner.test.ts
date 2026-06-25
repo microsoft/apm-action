@@ -845,6 +845,194 @@ describe('run', () => {
   });
 });
 
+// `apm update` support (microsoft/apm-action#46)
+describe('update input', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'apm-action-update-'));
+    mockEnsureApmInstalled.mockResolvedValue({ resolvedVersion: '0.14.0', toolDir: '/opt/hostedtoolcache/apm/0.14.0/x64', binaryPath: '/opt/hostedtoolcache/apm/0.14.0/x64/apm' });
+    mockExec.mockResolvedValue(0);
+    mockGetExecOutput.mockResolvedValue({ exitCode: 0, stdout: '', stderr: '' });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('runs `apm update --yes` instead of `apm install` when update: true', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'update': return 'true';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    const apmCalls = mockExec.mock.calls.filter(c => c[0] === 'apm');
+    // `apm update --yes` was invoked, and `apm install` was not.
+    expect(apmCalls.some(c => Array.isArray(c[1]) && c[1][0] === 'update' && (c[1] as string[]).includes('--yes'))).toBe(true);
+    expect(apmCalls.some(c => Array.isArray(c[1]) && c[1][0] === 'install')).toBe(false);
+  });
+
+  it('runs `apm install` (not update) when update unset', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    const apmCalls = mockExec.mock.calls.filter(c => c[0] === 'apm');
+    expect(apmCalls.some(c => Array.isArray(c[1]) && c[1][0] === 'install')).toBe(true);
+    expect(apmCalls.some(c => Array.isArray(c[1]) && c[1][0] === 'update')).toBe(false);
+  });
+
+  it('still runs compile after update when both set', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+    fs.mkdirSync(path.join(tmpDir, '.github'), { recursive: true });
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'update': return 'true';
+        case 'compile': return 'true';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).not.toHaveBeenCalled();
+    const apmCalls = mockExec.mock.calls.filter(c => c[0] === 'apm');
+    expect(apmCalls.some(c => Array.isArray(c[1]) && c[1][0] === 'update')).toBe(true);
+    expect(apmCalls.some(c => Array.isArray(c[1]) && c[1][0] === 'compile')).toBe(true);
+  });
+
+  it('rejects update + setup-only with consolidated error', async () => {
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'setup-only': return 'true';
+        case 'update': return 'true';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining("'setup-only' is mutually exclusive with: update"),
+    );
+  });
+
+  it('rejects update + isolated with a clear error', async () => {
+    fs.mkdirSync(tmpDir, { recursive: true });
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'isolated': return 'true';
+        case 'dependencies': return 'microsoft/some-package';
+        case 'update': return 'true';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining("'update' is mutually exclusive with: isolated"),
+    );
+  });
+
+  it('rejects update + bundle with a clear error', async () => {
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'bundle': return 'some-bundle.zip';
+        case 'update': return 'true';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining("'update' is mutually exclusive with: bundle"),
+    );
+  });
+
+  it('rejects update + mode: release with a clear error', async () => {
+    mockGetInput.mockImplementation((name: unknown) => {
+      switch (name) {
+        case 'working-directory': return tmpDir;
+        case 'mode': return 'release';
+        case 'update': return 'true';
+        default: return '';
+      }
+    });
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+      expect.stringContaining("mode='release' is mutually exclusive with: update"),
+    );
+  });
+
+  it('fails fast when update: true but no apm.yml is present (deps input)', async () => {
+    // No apm.yml written. With inline deps present, the legacy condition
+    // would have skipped the project verb entirely, silently ignoring
+    // update. The action must instead fail fast (issue #46 review).
+    fs.mkdirSync(tmpDir, { recursive: true });
+    mockGetInput.mockImplementation((name: unknown) => {
+    switch (name) {
+      case 'working-directory': return tmpDir;
+      case 'dependencies': return 'microsoft/some-package';
+      case 'update': return 'true';
+      default: return '';
+    }
+    });
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+    expect.stringContaining("'update: true' requires an apm.yml"),
+    );
+    // The project verb must NOT have run (neither install nor update).
+    const apmCalls = mockExec.mock.calls.filter(c => c[0] === 'apm');
+    expect(apmCalls.some(c => Array.isArray(c[1]) && c[1][0] === 'update')).toBe(false);
+  });
+
+  it('fails fast when update: true but no apm.yml is present (no deps)', async () => {
+    fs.mkdirSync(tmpDir, { recursive: true });
+    mockGetInput.mockImplementation((name: unknown) => {
+    switch (name) {
+      case 'working-directory': return tmpDir;
+      case 'update': return 'true';
+      default: return '';
+    }
+    });
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+    expect.stringContaining("'update: true' requires an apm.yml"),
+    );
+    const apmCalls = mockExec.mock.calls.filter(c => c[0] === 'apm');
+    expect(apmCalls.some(c => Array.isArray(c[1]) && c[1][0] === 'update')).toBe(false);
+  });
+});
+
 describe('run (restore mode)', () => {
   let tmpDir: string;
 
