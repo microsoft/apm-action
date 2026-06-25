@@ -988,6 +988,49 @@ describe('update input', () => {
       expect.stringContaining("mode='release' is mutually exclusive with: update"),
     );
   });
+
+  it('fails fast when update: true but no apm.yml is present (deps input)', async () => {
+    // No apm.yml written. With inline deps present, the legacy condition
+    // would have skipped the project verb entirely, silently ignoring
+    // update. The action must instead fail fast (issue #46 review).
+    fs.mkdirSync(tmpDir, { recursive: true });
+    mockGetInput.mockImplementation((name: unknown) => {
+    switch (name) {
+      case 'working-directory': return tmpDir;
+      case 'dependencies': return 'microsoft/some-package';
+      case 'update': return 'true';
+      default: return '';
+    }
+    });
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+    expect.stringContaining("'update: true' requires an apm.yml"),
+    );
+    // The project verb must NOT have run (neither install nor update).
+    const apmCalls = mockExec.mock.calls.filter(c => c[0] === 'apm');
+    expect(apmCalls.some(c => Array.isArray(c[1]) && c[1][0] === 'update')).toBe(false);
+  });
+
+  it('fails fast when update: true but no apm.yml is present (no deps)', async () => {
+    fs.mkdirSync(tmpDir, { recursive: true });
+    mockGetInput.mockImplementation((name: unknown) => {
+    switch (name) {
+      case 'working-directory': return tmpDir;
+      case 'update': return 'true';
+      default: return '';
+    }
+    });
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(
+    expect.stringContaining("'update: true' requires an apm.yml"),
+    );
+    const apmCalls = mockExec.mock.calls.filter(c => c[0] === 'apm');
+    expect(apmCalls.some(c => Array.isArray(c[1]) && c[1][0] === 'update')).toBe(false);
+  });
 });
 
 describe('run (restore mode)', () => {

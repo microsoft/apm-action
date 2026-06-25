@@ -519,8 +519,22 @@ export async function run(): Promise<void> {
       // inline deps. `update: true` swaps `apm install` for `apm update
       // --yes`, re-resolving branch/tag refs and rewriting the lockfile
       // non-interactively (microsoft/apm-action#46).
-      const projectVerb = update ? ['update', '--yes'] : ['install'];
       const apmYmlPath = path.join(resolvedDir, 'apm.yml');
+      // `update` is a project-manifest refresh: it re-resolves the refs
+      // declared in apm.yml and rewrites apm.lock.yaml. With no apm.yml
+      // there is nothing to refresh, so fail fast rather than silently
+      // ignoring the flag -- the `dependencies` input is an additive
+      // inline install, not a manifest refresh.
+      if (update && !fs.existsSync(apmYmlPath)) {
+        throw new Error(
+          `'update: true' requires an apm.yml in the working directory to `
+          + `refresh, but none was found at ${apmYmlPath}. 'apm update' `
+          + `re-resolves apm.yml refs and rewrites apm.lock.yaml; the `
+          + `'dependencies' input is an additive inline install, not a `
+          + `manifest refresh. Commit an apm.yml, or remove update: true.`,
+        );
+      }
+      const projectVerb = update ? ['update', '--yes'] : ['install'];
       if (fs.existsSync(apmYmlPath) || !depsInput) {
         await runApm(projectVerb, resolvedDir);
       }

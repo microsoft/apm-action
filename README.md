@@ -81,7 +81,7 @@ jobs:
           branch: apm/auto-update
 ```
 
-`update: true` composes with `audit-report`, `compile`, `script`, `dependencies`, and `pack` (which all run after the refresh). It is mutually exclusive with `isolated`, `setup-only`, `bundle`, `bundles-file`, and `mode`, since those either skip the project install or build from scratch with no lockfile to update.
+`update: true` composes with `audit-report`, `compile`, `script`, `dependencies`, and `pack` (which all run after the refresh). It requires an `apm.yml` in the working directory to refresh and fails fast if none is present (the `dependencies` input is an additive inline install, not a manifest refresh). It is mutually exclusive with `isolated`, `setup-only`, `bundle`, `bundles-file`, and `mode`, since those either skip the project install or build from scratch with no lockfile to update.
 
 ### Bundle format (`apm` vs `plugin`)
 
