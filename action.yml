@@ -34,6 +34,19 @@ inputs:
     description: 'Run apm compile after install to generate AGENTS.md'
     required: false
     default: 'false'
+  update:
+    description: |
+      Re-resolve dependencies instead of installing from the lockfile.
+      When 'true', the action runs `apm update --yes` in place of
+      `apm install`: it refreshes branch/tag refs to their latest matching
+      commit and rewrites apm.lock.yaml, then proceeds with the normal
+      post-install steps (audit-report, compile, script, pack). Use this in
+      a scheduled or workflow_dispatch job that opens a PR with the updated
+      assets. Defaults to 'false' (install pinned versions from the lockfile,
+      the reproducible-by-default behaviour). Mutually exclusive with
+      isolated, setup-only, bundle, bundles-file, and mode.
+    required: false
+    default: 'false'
   pack:
     description: 'Pack a bundle after install. Format is controlled by `bundle-format` (default: apm). Archived output is .zip by default (apm 0.20+); older CLIs emit .tar.gz. Both are accepted on restore.'
     required: false

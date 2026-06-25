@@ -84,6 +84,7 @@ function parseMarketplacePath(raw: string): string[] {
  * With `dependencies` input: parses YAML array, installs each as extra deps (additive to apm.yml).
  * With `isolated: true`: clears existing primitives, ignores apm.yml, installs only inline deps.
  * With `compile: true`: runs apm compile after install to generate AGENTS.md.
+ * With `update: true`: runs `apm update --yes` instead of `apm install`, re-resolving refs and rewriting the lockfile.
  * With `script` input: runs an apm script after install.
  * With `pack: true`: runs apm pack after install to produce a bundle.
  * With `bundle` input: restores from a bundle (no APM install needed).
@@ -97,6 +98,13 @@ export async function run(): Promise<void> {
     const bundlesFileInput = core.getInput('bundles-file').trim();
     const packInput = core.getInput('pack') === 'true';
     const isolated = core.getInput('isolated') === 'true';
+    // `update: true` swaps the project-install verb from `apm install` to
+    // `apm update --yes`, re-resolving branch/tag refs and rewriting the
+    // lockfile (microsoft/apm-action#46). It only makes sense in the
+    // default project-install flow, so it is rejected in the no-install
+    // modes (setup-only / bundle / bundles-file / mode) and in isolated
+    // mode (a from-scratch install with no pre-existing lockfile to update).
+    const update = core.getInput('update') === 'true';
 
     // Default `packages` output to '[]' so downstream `fromJSON()` steps
     // can parse it unconditionally regardless of mode. mode: release
@@ -120,6 +128,7 @@ export async function run(): Promise<void> {
       if (bundleInput) modeConflicts.push('bundle');
       if (bundlesFileInput) modeConflicts.push('bundles-file');
       if (core.getInput('setup-only') === 'true') modeConflicts.push('setup-only');
+      if (update) modeConflicts.push('update');
       if (modeConflicts.length > 0) {
         throw new Error(
           `mode='${modeInput}' is mutually exclusive with: ${modeConflicts.join(', ')}. `
@@ -262,6 +271,7 @@ export async function run(): Promise<void> {
       if (core.getInput('offline') === 'true') conflicts.push('offline');
       if (core.getInput('include-prerelease') === 'true') conflicts.push('include-prerelease');
       if (core.getInput('mode').trim()) conflicts.push('mode');
+      if (update) conflicts.push('update');
       if (conflicts.length > 0) {
         throw new Error(
           `'setup-only' is mutually exclusive with: ${conflicts.join(', ')}. `
@@ -301,6 +311,23 @@ export async function run(): Promise<void> {
         `inputs 'pack', 'bundle', and 'bundles-file' are mutually exclusive `
         + `(got: ${modeFlags.join(', ')}). Pick exactly one mode per step.`,
       );
+    }
+
+    // `update` mutex: it swaps the project-install verb and is meaningless
+    // in the no-install restore modes and in from-scratch isolated installs.
+    // Fail fast with a clear message rather than silently ignoring the flag.
+    if (update) {
+      const updateConflicts: string[] = [];
+      if (isolated) updateConflicts.push('isolated');
+      if (bundleInput) updateConflicts.push('bundle');
+      if (bundlesFileInput) updateConflicts.push('bundles-file');
+      if (updateConflicts.length > 0) {
+        throw new Error(
+          `'update' is mutually exclusive with: ${updateConflicts.join(', ')}. `
+          + `update re-resolves dependencies in the project-install flow; `
+          + `remove the conflicting input(s) or set update: false.`,
+        );
+      }
     }
 
     // Reject pack pass-through inputs outside pack mode early, so they
@@ -488,10 +515,14 @@ export async function run(): Promise<void> {
       await generateManifest(resolvedDir, deps, validatedTarget);
       await runApm(['install'], resolvedDir);
     } else {
-      // Default: install from apm.yml (if present), then add inline deps
+      // Default: install (or update) from apm.yml (if present), then add
+      // inline deps. `update: true` swaps `apm install` for `apm update
+      // --yes`, re-resolving branch/tag refs and rewriting the lockfile
+      // non-interactively (microsoft/apm-action#46).
+      const projectVerb = update ? ['update', '--yes'] : ['install'];
       const apmYmlPath = path.join(resolvedDir, 'apm.yml');
       if (fs.existsSync(apmYmlPath) || !depsInput) {
-        await runApm(['install'], resolvedDir);
+        await runApm(projectVerb, resolvedDir);
       }
 
       // Install extra inline deps additively

@@ -49,6 +49,40 @@ Just install the APM CLI and put it on `PATH`, like `actions/setup-node`. Run an
 
 `setup-only: true` is mutually exclusive with `pack`, `bundle`, and `bundles-file`. The action will not read `apm.yml`, run `apm install`, or deploy primitives. Sets the `apm-version` and `apm-path` outputs so downstream steps can branch on the resolved CLI.
 
+### Update mode (refresh branch/tag refs)
+
+By default the action runs `apm install`, which honours `apm.lock.yaml` and pins each dependency to the exact commit recorded in the lockfile — reproducible by design. Dependencies tracked by a branch or tag (e.g. `github/awesome-copilot#main`) therefore stay frozen until the lockfile is refreshed.
+
+Set `update: 'true'` to run `apm update --yes` instead: it re-resolves every ref to its latest matching commit, rewrites `apm.lock.yaml`, and deploys the refreshed assets. Pair it with a PR-opening step to land the changes:
+
+```yaml
+name: Refresh AI agent assets
+on:
+  schedule:
+    - cron: '0 6 * * 1'   # Monday 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  apm-update:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: microsoft/apm-action@v1
+        with:
+          update: 'true'
+          audit-report: 'true'
+      - name: Open PR if changed
+        uses: peter-evans/create-pull-request@v6
+        with:
+          title: 'chore: update AI agent assets'
+          branch: apm/auto-update
+```
+
+`update: true` composes with `audit-report`, `compile`, `script`, `dependencies`, and `pack` (which all run after the refresh). It is mutually exclusive with `isolated`, `setup-only`, `bundle`, `bundles-file`, and `mode`, since those either skip the project install or build from scratch with no lockfile to update.
+
 ### Bundle format (`apm` vs `plugin`)
 
 `apm pack` supports two layouts:
@@ -315,6 +349,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | `dependencies` | No | | YAML array of extra dependencies to install (additive to apm.yml) |
 | `isolated` | No | `false` | Ignore apm.yml and clear pre-existing primitive dirs — install only inline dependencies |
 | `compile` | No | `false` | Run `apm compile` after install to generate AGENTS.md |
+| `update` | No | `false` | Run `apm update --yes` instead of `apm install`: re-resolve branch/tag refs to their latest matching commit and rewrite `apm.lock.yaml`, then run the normal post-install steps. Use in a scheduled/dispatch job that opens a PR with the refreshed assets. Mutually exclusive with `isolated`, `setup-only`, `bundle`, `bundles-file`, and `mode`. |
 | `pack` | No | `false` | Pack a bundle after install (produces `.tar.gz` by default) |
 | `bundle-format` | No | `apm` | Bundle layout when `pack: true`. `apm` produces an APM bundle (with `apm.lock.yaml` and a `.github/` tree, restorable by this action). `plugin` produces a Claude Code plugin bundle (with `plugin.json` at the root, intended for marketplace consumption). |
 | `setup-only` | No | `false` | Install the APM CLI and exit. No `apm.yml` is read, no `apm install` runs, no primitives are deployed. Mutually exclusive with `pack`, `bundle`, and `bundles-file`. |
