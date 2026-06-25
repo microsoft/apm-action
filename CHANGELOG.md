@@ -10,9 +10,15 @@ The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-06-25
+
 ### Added
 
 - **`update` input to refresh branch/tag dependency refs** ([microsoft/apm-action#46]). When `update: 'true'`, the action runs `apm update --yes` in place of `apm install`: it re-resolves every branch/tag dependency to its latest matching commit, rewrites `apm.lock.yaml`, and then proceeds with the normal post-install steps (`audit-report`, `compile`, `script`, `pack`). The default (`false`) keeps the reproducible install-from-lockfile behaviour. Closes the gap where branch-tracked deps (e.g. `github/awesome-copilot#main`) stayed frozen at the lockfile commit with no first-class way to refresh them — the previous workaround was a hand-rolled `script: "apm update --yes"`. Mutually exclusive with `isolated`, `setup-only`, `bundle`, `bundles-file`, and `mode`.
+
+### Fixed
+
+- **`.zip` bundles produced by `apm pack` are now detected in archive mode** ([microsoft/apm-action#47]). apm 0.20 changed `apm pack --archive` to emit a `.zip` by default ([microsoft/apm#1720]); the action's bundle-detection paths still assumed `.tar.gz`, so against apm 0.20+ they silently failed — `findBundleOrNull` matched zero `.zip` entries and the pack step errored "apm pack produced no bundle" (the GH-AW Compatibility job in microsoft/apm release runs). Fix: accept BOTH `.zip` and `.tar.gz` on the detection side (a format-aware `listArchiveEntries` helper using `unzip -Z1` for `.zip` and `tar tzf` for `.tar.gz`) rather than pinning `--archive-format` on the pack call, which would break older CLIs that do not know the flag. Directory mode, the `tar.gz` opt-out, and the `bundles-file` multibundle `.tar.gz` restore contract are unchanged.
 
 ## [1.9.1] - 2026-05-19
 
@@ -93,7 +99,9 @@ APM v0.12.3 made harness detection strict (no more silent default-to-copilot). E
 [#34]: https://github.com/microsoft/apm-action/pull/34
 
 [microsoft/apm-action#46]: https://github.com/microsoft/apm-action/issues/46
+[microsoft/apm-action#47]: https://github.com/microsoft/apm-action/pull/47
 [microsoft/apm#1348]: https://github.com/microsoft/apm/issues/1348
+[microsoft/apm#1720]: https://github.com/microsoft/apm/issues/1720
 
 ## [1.6.0] - 2026-05-02
 
