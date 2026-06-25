@@ -81,6 +81,86 @@ jobs:
           fi
           echo "✅ Primitives deployed from manifest"
 
+  # Integration: update mode -- refresh an existing install via
+  # `apm update --yes` (the verb swap from issue #46), then prove the
+  # mutex guard rejects update combined with a no-install mode.
+  test-update:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create test apm.yml
+        run: |
+          cat > apm.yml << 'EOF'
+          name: ci-update-test
+          version: 1.0.0
+          target: copilot
+          dependencies:
+            apm:
+              - microsoft/apm-sample-package
+          EOF
+
+      - name: Seed an initial install (default verb)
+        uses: ./
+
+      - name: Verify install seeded a resolved lockfile
+        run: |
+          if [ ! -f apm.lock.yaml ]; then
+            echo "::error::install did not create apm.lock.yaml"
+            exit 1
+          fi
+          if ! grep -q 'resolved_commit:' apm.lock.yaml; then
+            echo "::error::lockfile has no resolved_commit after install"
+            exit 1
+          fi
+          echo "Install seeded apm.lock.yaml with a resolved commit"
+
+      - name: Run action in update mode
+        uses: ./
+        with:
+          update: 'true'
+
+      - name: Verify update refreshed the project end-to-end
+        run: |
+          # The refresh path from issue #46: 'apm update --yes' must keep a
+          # valid, resolved lockfile and leave the deployed primitives in
+          # place. A failure here means the verb swap did not run the real
+          # update flow successfully against the live apm CLI.
+          if [ ! -f apm.lock.yaml ]; then
+            echo "::error::update removed apm.lock.yaml"
+            exit 1
+          fi
+          if ! grep -q 'resolved_commit:' apm.lock.yaml; then
+            echo "::error::lockfile lost resolved_commit after update"
+            exit 1
+          fi
+          if ! find .agents/skills .github -type f \
+               \( -name 'SKILL.md' -o -name '*.instructions.md' \
+                  -o -name '*.agent.md' -o -name '*.prompt.md' \) 2>/dev/null \
+               | grep -q .; then
+            echo "::error::no primitives deployed after update"
+            exit 1
+          fi
+          echo "update mode refreshed lockfile and primitives successfully"
+
+      - name: Attempt update + setup-only -- expect failure
+        id: update-mutex
+        continue-on-error: true
+        uses: ./
+        with:
+          update: 'true'
+          setup-only: 'true'
+
+      - name: Assert update mutex rejected the conflicting combo
+        run: |
+          if [ "${{ steps.update-mutex.outcome }}" != "failure" ]; then
+            echo "::error::update + setup-only should be rejected, got ${{ steps.update-mutex.outcome }}"
+            exit 1
+          fi
+          echo "update + setup-only correctly rejected by mutex guard"
+
   # Integration: isolated mode (inline deps only, clean .github/)
   test-isolated:
     needs: build
@@ -532,7 +612,7 @@ jobs:
 
   # Release: update major version tag (v1 → v1.x.x)
   release:
-    needs: [build, test-manifest, test-isolated, test-compile, test-pack, test-restore-artifact, test-restore-clean-workspace]
+    needs: [build, test-manifest, test-update, test-isolated, test-compile, test-pack, test-restore-artifact, test-restore-clean-workspace]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     timeout-minutes: 5
