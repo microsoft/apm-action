@@ -182,6 +182,37 @@ describe('extractBundle', () => {
     await expect(extractBundle(bundlePath, tmpDir))
       .rejects.toThrow('apm unpack failed with exit code 1');
   });
+
+  it('detects format of a .zip bundle via unzip -Z1 (apm 0.20+ default)', async () => {
+    const zipBundle = path.join(tmpDir, 'test-bundle.zip');
+    fs.writeFileSync(zipBundle, 'fake-zip');
+    // .zip must be listed with `unzip -Z1`, not `tar tzf` (GNU tar cannot
+    // read zip). Return an APM-format listing only for that command.
+    mockGetExecOutput.mockImplementation(async (cmd, args) => {
+      if (cmd === 'unzip' && args?.[0] === '-Z1') {
+        return {
+          exitCode: 0,
+          stdout: 'pkg-1.0.0/\npkg-1.0.0/apm.lock.yaml\npkg-1.0.0/.github/agents/foo.md\n',
+          stderr: '',
+        };
+      }
+      return { exitCode: 1, stdout: '', stderr: 'wrong tool for archive format' };
+    });
+    mockExec.mockImplementation(async (cmd, args?) => {
+      if (cmd === 'apm' && args?.[0] === '--version') return 0;
+      if (cmd === 'apm' && args?.[0] === 'unpack') return 0;
+      return 1;
+    });
+
+    const result = await extractBundle(zipBundle, tmpDir);
+    expect(result.format).toBe('apm');
+
+    const listCall = mockGetExecOutput.mock.calls.find(c => c[0] === 'unzip');
+    expect(listCall).toBeTruthy();
+    expect(listCall![1]).toEqual(['-Z1', zipBundle]);
+    // tar tzf must NOT be used for a .zip path.
+    expect(mockGetExecOutput.mock.calls.some(c => c[0] === 'tar' && (c[1] as string[])?.[0] === 'tzf')).toBe(false);
+  });
 });
 
 describe('runPackStep', () => {
@@ -249,13 +280,31 @@ describe('runPackStep', () => {
     expect(result.bundlePath).toContain('test-pkg-1.0.0');
   });
 
+  it('finds a single .zip archive (apm 0.20+ default)', async () => {
+    fs.writeFileSync(path.join(buildDir, 'test-pkg-1.0.0.zip'), 'fake');
+    mockExec.mockResolvedValue(0);
+
+    const result = await runPackStep(tmpDir, { archive: true, format: 'apm' });
+    expect(result.bundlePath).toContain('test-pkg-1.0.0.zip');
+    expect(result.format).toBe('apm');
+  });
+
   it('throws when multiple archives found', async () => {
     fs.writeFileSync(path.join(buildDir, 'pkg-a-1.0.tar.gz'), 'fake');
     fs.writeFileSync(path.join(buildDir, 'pkg-b-2.0.tar.gz'), 'fake');
     mockExec.mockResolvedValue(0);
 
     await expect(runPackStep(tmpDir, { archive: true, format: 'apm' }))
-      .rejects.toThrow('Multiple .tar.gz archives found in build directory after apm pack');
+      .rejects.toThrow('Multiple bundle archives found in build directory after apm pack');
+  });
+
+  it('throws when a .zip and a .tar.gz both linger in build/ (stale build dir)', async () => {
+    fs.writeFileSync(path.join(buildDir, 'pkg-1.0.0.zip'), 'fake');
+    fs.writeFileSync(path.join(buildDir, 'pkg-1.0.0.tar.gz'), 'fake');
+    mockExec.mockResolvedValue(0);
+
+    await expect(runPackStep(tmpDir, { archive: true, format: 'apm' }))
+      .rejects.toThrow('Multiple bundle archives found in build directory after apm pack');
   });
 
   it('throws when multiple bundle directories found', async () => {

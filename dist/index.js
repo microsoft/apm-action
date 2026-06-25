@@ -32685,10 +32685,34 @@ async function resolveLocalBundle(pattern, workspaceDir) {
     return resolvedBundle;
 }
 /**
+ * List the entry names inside a bundle archive without extracting it.
+ *
+ * Format-aware so the action tolerates both archive shapes apm emits:
+ * .tar.gz (read with `tar tzf`) and .zip (read with `unzip -Z1`, the
+ * zipinfo short listing -- one entry name per line). GitHub-hosted Linux
+ * and macOS runners ship both `tar` and `unzip`. Entry names share the
+ * same shape across both tools (`wrapper/apm.lock.yaml`), so callers can
+ * apply identical marker matching regardless of archive format.
+ */
+async function listArchiveEntries(bundlePath) {
+    const isZip = bundlePath.endsWith('.zip');
+    const cmd = isZip ? 'unzip' : 'tar';
+    const args = isZip ? ['-Z1', bundlePath] : ['tzf', bundlePath];
+    const list = await exec/* getExecOutput */.H(cmd, args, {
+        ignoreReturnCode: true,
+        silent: true,
+    });
+    if (list.exitCode !== 0) {
+        throw new Error(`Failed to list bundle contents (${cmd} ${args[0]} exit ${list.exitCode}): `
+            + (list.stderr.trim() || 'unknown error'));
+    }
+    return list.stdout.split('\n').map(l => l.trim()).filter(Boolean);
+}
+/**
  * Inspect a bundle archive to determine its format without extracting it.
  *
- * Reads the tar table-of-contents (`tar tzf`) and looks for the format
- * markers:
+ * Reads the archive table-of-contents (format-aware: `tar tzf` for .tar.gz,
+ * `unzip -Z1` for .zip) and looks for the format markers:
  *   - APM bundle: `apm.lock.yaml` (lockfile-driven, .github/.claude trees)
  *   - Plugin bundle: `plugin.json` at the bundle root (Claude Code marketplace
  *     layout, flat agents/skills/commands/instructions/ dirs, no lockfile)
@@ -32701,15 +32725,7 @@ async function resolveLocalBundle(pattern, workspaceDir) {
  * inside the wrapper to stay tolerant of archive shape changes.
  */
 async function detectBundleFormat(bundlePath) {
-    const list = await exec/* getExecOutput */.H('tar', ['tzf', bundlePath], {
-        ignoreReturnCode: true,
-        silent: true,
-    });
-    if (list.exitCode !== 0) {
-        throw new Error(`Failed to list bundle contents (tar tzf exit ${list.exitCode}): `
-            + (list.stderr.trim() || 'unknown error'));
-    }
-    const entries = list.stdout.split('\n').map(l => l.trim()).filter(Boolean);
+    const entries = await listArchiveEntries(bundlePath);
     // APM and plugin bundles always wrap their contents in a single top-level
     // directory named after the package (e.g. `roundtrip-1.0.0/`). Match the
     // format markers ONLY at that depth to avoid false positives from a nested
@@ -32778,6 +32794,12 @@ async function extractBundle(bundlePath, outputDir) {
     // deployable output -- the same files that `apm unpack` (the primary path)
     // intentionally never copies. Leaking them into a git checkout dirties the
     // workspace and breaks downstream `git checkout` steps. See microsoft/apm-action#26.
+    //
+    // NOTE: this fallback handles .tar.gz only. A .zip bundle reaching here
+    // (apm unavailable) is unsupported -- the primary `apm unpack` path above
+    // handles .zip natively, so this matters solely for the near-dead
+    // apm-missing path. Zip-aware fallback extraction (no `tar --strip-components`
+    // equivalent in `unzip`) is deliberately deferred.
     lib_core/* info */.pq('APM not available -- extracting with tar (no verification)...');
     const rc = await exec/* exec */.m('tar', [
         'xzf', resolvedBundle,
@@ -32903,8 +32925,17 @@ async function runPackStep(workingDir, opts) {
     return { bundlePath, format: opts.format, marketplaceJsonPath };
 }
 /**
+ * Recognized archive extensions, in detection order. `apm pack --archive`
+ * emits .zip by default as of apm 0.20; older CLIs (and pipelines that opt
+ * back in with --archive-format tar.gz) emit .tar.gz. The action accepts
+ * either so it stays compatible across the apm-version range it supports --
+ * pinning --archive-format on the pack call would break older CLIs that do
+ * not know the flag.
+ */
+const ARCHIVE_EXTENSIONS = ['.zip', '.tar.gz'];
+/**
  * Find the bundle output in the build directory.
- * For archives: look for .tar.gz files.
+ * For archives: look for .zip or .tar.gz files.
  * For directories: look for non-hidden directories.
  *
  * Returns null when the build directory is missing or contains no bundle
@@ -32923,12 +32954,14 @@ function findBundleOrNull(buildDir, archive) {
     }
     const entries = external_fs_.readdirSync(buildDir);
     if (archive) {
-        const archives = entries.filter(e => e.endsWith('.tar.gz')).sort();
+        const archives = entries
+            .filter(e => ARCHIVE_EXTENSIONS.some(ext => e.endsWith(ext)))
+            .sort();
         if (archives.length === 0) {
             return null;
         }
         if (archives.length > 1) {
-            throw new Error(`Multiple .tar.gz archives found in build directory after apm pack: ${archives.join(', ')}`);
+            throw new Error(`Multiple bundle archives found in build directory after apm pack: ${archives.join(', ')}`);
         }
         return external_path_.join(buildDir, archives[0]);
     }
