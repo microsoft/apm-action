@@ -15,7 +15,7 @@ jobs:
     name: Pinned version (Ubuntu)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Run apm-action with pinned version 0.7.5
         uses: ./
@@ -39,7 +39,7 @@ jobs:
     name: Pinned version (Ubuntu ARM64)
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Run apm-action with pinned version 0.7.5
         uses: ./
@@ -63,7 +63,7 @@ jobs:
     name: Latest version (Ubuntu)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
 
       - name: Run apm-action with latest
         uses: ./
