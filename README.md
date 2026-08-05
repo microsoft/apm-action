@@ -343,7 +343,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `working-directory` | No | `.` | Working directory for execution. Must exist in non-isolated mode (with your `apm.yml`). In `isolated`, `pack`, or `bundle` modes the directory is created automatically. |
-| `apm-version` | No | `latest` | APM version to install |
+| `apm-version` | No | `0.14.0` | APM version to install. Defaults to a pinned, known-good release. |
 | `github-token` | No | `${{ github.token }}` | GitHub token for API calls. Auto-forwarded as `GITHUB_APM_PAT` so same-org private repos work with zero config. Pass a broader-scoped PAT for cross-org access. |
 | `script` | No | | APM script to run after install |
 | `dependencies` | No | | YAML array of extra dependencies to install (additive to apm.yml) |
