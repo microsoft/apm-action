@@ -13,7 +13,7 @@ jobs:
     name: Install with inline dependencies (additive)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Run apm-action with inline deps
         uses: microsoft/apm-action@main
@@ -58,7 +58,7 @@ jobs:
     name: Install with isolated mode (exclusive)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Run apm-action with isolated mode
         uses: microsoft/apm-action@main
@@ -84,7 +84,7 @@ jobs:
     name: Install + compile from apm.yml
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Create test apm.yml
         run: |
