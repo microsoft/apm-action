@@ -13,10 +13,10 @@ jobs:
     name: Install with inline dependencies (additive)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Run apm-action with inline deps
-        uses: microsoft/apm-action@main
+        uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1.10.0
         with:
           target: copilot
           dependencies: |
@@ -58,10 +58,10 @@ jobs:
     name: Install with isolated mode (exclusive)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Run apm-action with isolated mode
-        uses: microsoft/apm-action@main
+        uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1.10.0
         with:
           isolated: 'true'
           target: copilot
@@ -84,7 +84,7 @@ jobs:
     name: Install + compile from apm.yml
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
       - name: Create test apm.yml
         run: |
@@ -98,7 +98,7 @@ jobs:
           EOF
 
       - name: Run apm-action with compile
-        uses: microsoft/apm-action@main
+        uses: microsoft/apm-action@d723bb64ed70c135bbaf87d126b721dd2dae0439 # v1.10.0
         with:
           compile: 'true'
 
