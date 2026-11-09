@@ -10,6 +10,10 @@ The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 
 ## [Unreleased]
 
+### Changed
+
+- **Propose Apache-2.0 licensing for APM-owned content** ([#73](https://github.com/microsoft/apm-action/pull/73)). Preserve Microsoft attribution and the historical MIT grant in `NOTICE`. Third-party components and previously published MIT releases retain their original terms. Rights review is required before merge.
+
 ## [1.10.0] - 2026-06-25
 
 ### Added
