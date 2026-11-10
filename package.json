@@ -15,7 +15,7 @@
     "url": "git+https://github.com/microsoft/apm-action.git"
   },
   "author": "microsoft",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "dependencies": {
     "@actions/core": "^3.0.0",
     "@actions/exec": "^3.0.0",

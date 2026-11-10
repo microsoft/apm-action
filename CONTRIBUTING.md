@@ -23,3 +23,13 @@ npm run test       # jest
 ```
 
 Source lives in `src/`. The compiled bundle in `dist/index.js` is what the action runs.
+
+## License
+
+APM-owned code and documentation are licensed under [Apache-2.0](LICENSE).
+Third-party components retain their own licenses; keep
+[`dist/licenses.txt`](dist/licenses.txt) with the compiled bundle.
+[NOTICE](NOTICE) preserves Microsoft attribution and the historical MIT notice.
+Previously published MIT releases remain under their original terms.
+Redistributors updating to this version should review the Apache-2.0 terms and
+retain the applicable license and notices.
