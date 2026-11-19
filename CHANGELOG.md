@@ -10,19 +10,30 @@ The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-11-19
+
+### Upgrade notes
+
+This release moves the default `apm-version` from `0.14.0` to `0.36.1` ([#76](https://github.com/microsoft/apm-action/pull/76)). Workflows that do not set `apm-version` now run the current APM CLI. Check these before moving to `@v1`:
+
+- **Committed deployed files plus an older lockfile can fail `apm install`.** If your repo commits the files APM deployed (for example `.agents/skills/...`) together with an `apm.lock.yaml` written by APM 0.14.0, APM 0.36.1 refuses to overwrite those skill files ("no trustworthy local deployment baseline" / "local files exist, not managed by APM") and the install step fails. Fix: run `apm install` once locally with APM 0.36.1 (add `--force` if it asks), then commit `apm.lock.yaml` and the deployed files. Or pin `apm-version: '0.14.0'` to keep the previous CLI. The action now prints this hint when it detects the version skew. Repos that do not commit deployed files are not affected.
+- **Bundles are `.zip` now.** `pack: true` produces `<name>-<version>.zip` instead of `.tar.gz` (APM 0.20+). Update downstream globs such as `bundle: './*.tar.gz'` or `upload-artifact` paths to `*.zip`. Restore still accepts existing `.tar.gz` bundles.
+- `compile: true` with only `target: copilot` may skip `AGENTS.md` when `.github/instructions/` already carries the same instructions (APM 0.17+). Other targets, such as `codex`, still write it.
+- `apm install` fails the step when it reports errors (APM 0.16+), and `mode: release` needs the generated `marketplace.json` committed (APM 0.29.1+).
+
 ### Added
 
-- **Automated `apm-version` default bump.** A scheduled `Bump default APM version` workflow opens a PR whenever microsoft/apm publishes a new stable release, after checking the release assets and the binary's `--version`. The default stays pinned and reproducible; it just no longer goes stale.
-- **Upgrade hint on lockfile/CLI version skew.** When `apm install` (or `apm update`) fails and the committed `apm.lock.yaml` was written by a different APM release, the action now warns with the fix: re-run `apm install` locally with the new CLI and commit, or pin `apm-version` to the lockfile's version.
+- **Automated `apm-version` default bump** ([#76](https://github.com/microsoft/apm-action/pull/76)). A scheduled `Bump default APM version` workflow opens a PR whenever microsoft/apm publishes a new stable release, after checking the release assets and the binary's `--version`. The default stays pinned and reproducible; it just no longer goes stale.
+- **Upgrade hint on lockfile/CLI version skew** ([#76](https://github.com/microsoft/apm-action/pull/76)). When `apm install` (or `apm update`) fails and the committed `apm.lock.yaml` was written by a different APM release, the action now warns with the fix: re-run `apm install` locally with the new CLI and commit, or pin `apm-version` to the lockfile's version.
 
 ### Changed
 
-- **Default `apm-version` is now `0.36.1`** (was `0.14.0`, about six months older). Users who do not set `apm-version` get the current CLI. Notable CLI behaviour changes since 0.14.0 that action users can see: `apm pack --archive` emits `.zip` instead of `.tar.gz` (0.20); `compile: true` with only `target: copilot` no longer writes `AGENTS.md` when `.github/instructions/` already carries the same instructions (0.17); `apm install` exits non-zero when it reports errors (0.16); and `apm pack --check-clean` fails release mode when the generated `marketplace.json` is not committed (0.29.1). Pin `apm-version: '0.14.0'` to keep the previous CLI.
-- **Propose Apache-2.0 licensing for APM-owned content** ([#73](https://github.com/microsoft/apm-action/pull/73)). Preserve Microsoft attribution and the historical MIT grant in `NOTICE`. Third-party components and previously published MIT releases retain their original terms. Rights review is required before merge.
+- **Default `apm-version` is now `0.36.1`** (was `0.14.0`) ([#76](https://github.com/microsoft/apm-action/pull/76), closes [#55](https://github.com/microsoft/apm-action/issues/55)). Users who do not set `apm-version` get the current CLI. See the upgrade notes above. Pin `apm-version: '0.14.0'` to keep the previous CLI.
+- **APM-owned content is licensed under Apache-2.0** ([#73](https://github.com/microsoft/apm-action/pull/73)). `NOTICE` preserves Microsoft attribution and the historical MIT grant. Third-party components and previously published MIT releases keep their original terms.
 
 ### Fixed
 
-- **`mode: release` now accepts the `.zip` archives emitted by apm 0.20+.** The release pipeline only looked for `.tar.gz` in `dist/`, so on any CLI from 0.20 onward (including `apm-version: latest`) it failed with "apm pack ... produced no .tar.gz". Both `.zip` and `.tar.gz` are now detected, hashed, and attached.
+- **`mode: release` now accepts the `.zip` archives emitted by apm 0.20+** ([#76](https://github.com/microsoft/apm-action/pull/76), closes [#60](https://github.com/microsoft/apm-action/issues/60)). The release pipeline only looked for `.tar.gz` in `dist/`, so on any CLI from 0.20 onward (including `apm-version: latest`) it failed with "apm pack ... produced no .tar.gz". Both `.zip` and `.tar.gz` are now detected, hashed, and attached.
 
 ## [1.10.0] - 2026-06-25
 
