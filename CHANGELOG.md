@@ -10,9 +10,19 @@ The floating `v1` tag tracks the latest `1.x` release. Consumers pinning
 
 ## [Unreleased]
 
+### Added
+
+- **Automated `apm-version` default bump.** A scheduled `Bump default APM version` workflow opens a PR whenever microsoft/apm publishes a new stable release, after checking the release assets and the binary's `--version`. The default stays pinned and reproducible; it just no longer goes stale.
+- **Upgrade hint on lockfile/CLI version skew.** When `apm install` (or `apm update`) fails and the committed `apm.lock.yaml` was written by a different APM release, the action now warns with the fix: re-run `apm install` locally with the new CLI and commit, or pin `apm-version` to the lockfile's version.
+
 ### Changed
 
+- **Default `apm-version` is now `0.36.1`** (was `0.14.0`, about six months older). Users who do not set `apm-version` get the current CLI. Notable CLI behaviour changes since 0.14.0 that action users can see: `apm pack --archive` emits `.zip` instead of `.tar.gz` (0.20); `compile: true` with only `target: copilot` no longer writes `AGENTS.md` when `.github/instructions/` already carries the same instructions (0.17); `apm install` exits non-zero when it reports errors (0.16); and `apm pack --check-clean` fails release mode when the generated `marketplace.json` is not committed (0.29.1). Pin `apm-version: '0.14.0'` to keep the previous CLI.
 - **Propose Apache-2.0 licensing for APM-owned content** ([#73](https://github.com/microsoft/apm-action/pull/73)). Preserve Microsoft attribution and the historical MIT grant in `NOTICE`. Third-party components and previously published MIT releases retain their original terms. Rights review is required before merge.
+
+### Fixed
+
+- **`mode: release` now accepts the `.zip` archives emitted by apm 0.20+.** The release pipeline only looked for `.tar.gz` in `dist/`, so on any CLI from 0.20 onward (including `apm-version: latest`) it failed with "apm pack ... produced no .tar.gz". Both `.zip` and `.tar.gz` are now detected, hashed, and attached.
 
 ## [1.10.0] - 2026-06-25
 

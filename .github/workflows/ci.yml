@@ -214,6 +214,12 @@ jobs:
           echo "Isolated mode: cleared existing primitives, installed only inline deps"
 
   # Integration: compile flag
+  #
+  # Uses target codex because AGENTS.md is Codex's native instructions file.
+  # Since apm 0.17, `apm compile --target copilot` skips AGENTS.md when the
+  # same instructions are already deployed under .github/instructions/
+  # (Copilot reads those natively), so a copilot-only compile can
+  # legitimately produce no AGENTS.md.
   test-compile:
     needs: build
     runs-on: ubuntu-latest
@@ -226,7 +232,7 @@ jobs:
         with:
           isolated: 'true'
           compile: 'true'
-          target: 'copilot'
+          target: 'codex'
           dependencies: |
             - microsoft/apm-sample-package
 
@@ -285,13 +291,19 @@ jobs:
 
       - name: Verify bundle archive exists and is valid
         run: |
+          # apm 0.20+ emits .zip from `apm pack --archive`; older CLIs emit .tar.gz.
           BUNDLE="${{ steps.pack.outputs.bundle-path }}"
           if [ ! -f "$BUNDLE" ]; then
             echo "::error::Bundle file not found: $BUNDLE"
             exit 1
           fi
-          if ! file "$BUNDLE" | grep -q 'gzip'; then
-            echo "::error::Bundle is not a valid gzip archive"
+          case "$BUNDLE" in
+            *.zip)    EXPECTED='Zip archive' ;;
+            *.tar.gz) EXPECTED='gzip' ;;
+            *) echo "::error::Unexpected bundle extension: $BUNDLE"; exit 1 ;;
+          esac
+          if ! file "$BUNDLE" | grep -q "$EXPECTED"; then
+            echo "::error::Bundle is not a valid $EXPECTED archive: $(file "$BUNDLE")"
             exit 1
           fi
 
@@ -299,7 +311,7 @@ jobs:
         if: matrix.bundle-format == 'apm'
         run: |
           BUNDLE="${{ steps.pack.outputs.bundle-path }}"
-          CONTENTS=$(tar tzf "$BUNDLE")
+          case "$BUNDLE" in *.zip) CONTENTS=$(unzip -Z1 "$BUNDLE") ;; *) CONTENTS=$(tar tzf "$BUNDLE") ;; esac
           echo "$CONTENTS" | grep -q 'apm.lock.yaml' || { echo "::error::APM bundle missing apm.lock.yaml"; exit 1; }
           echo "$CONTENTS" | grep -q '.github/' || { echo "::error::APM bundle missing .github/"; exit 1; }
           echo "$CONTENTS" | grep -q 'plugin.json' && { echo "::error::APM bundle should not contain plugin.json"; exit 1; }
@@ -309,7 +321,7 @@ jobs:
         if: matrix.bundle-format == 'plugin'
         run: |
           BUNDLE="${{ steps.pack.outputs.bundle-path }}"
-          CONTENTS=$(tar tzf "$BUNDLE")
+          case "$BUNDLE" in *.zip) CONTENTS=$(unzip -Z1 "$BUNDLE") ;; *) CONTENTS=$(tar tzf "$BUNDLE") ;; esac
           echo "$CONTENTS" | grep -q 'plugin.json' || { echo "::error::Plugin bundle missing plugin.json"; exit 1; }
           echo "Pack(plugin) layout valid"
 
@@ -417,8 +429,10 @@ jobs:
 
       - name: Move bundle aside and clear workspace
         run: |
+          # Keep the real extension (.zip on apm 0.20+, .tar.gz before):
+          # bundle-format detection is extension-driven.
           mkdir -p /tmp/apm-bundles
-          cp "${{ steps.pack.outputs.bundle-path }}" /tmp/apm-bundles/plugin.tar.gz
+          cp "${{ steps.pack.outputs.bundle-path }}" /tmp/apm-bundles/
           rm -rf .github/instructions .github/agents .github/skills .github/prompts apm.yml apm.lock.yaml
 
       - name: Attempt restore -- expect failure
@@ -426,7 +440,7 @@ jobs:
         continue-on-error: true
         uses: ./
         with:
-          bundle: '/tmp/apm-bundles/plugin.tar.gz'
+          bundle: '/tmp/apm-bundles/*'
 
       - name: Assert restore failed with plugin-format error
         run: |
@@ -477,7 +491,8 @@ jobs:
       - name: Test - restore from local bundle
         uses: ./
         with:
-          bundle: './*.tar.gz'
+          # Matches ci-test-restore-1.0.0.zip (apm 0.20+) or .tar.gz (older).
+          bundle: './ci-test-restore-*'
 
       - name: Verify primitives restored
         run: |
@@ -570,7 +585,7 @@ jobs:
       - name: Test - restore bundle into the tracked git checkout
         uses: ./
         with:
-          bundle: '/tmp/apm-bundle/*.tar.gz'
+          bundle: '/tmp/apm-bundle/*'
 
       - name: Assert apm.lock.yaml + apm.yml were NOT modified by restore
         run: |

@@ -367,7 +367,7 @@ export async function runPackStep(
  * pinning --archive-format on the pack call would break older CLIs that do
  * not know the flag.
  */
-const ARCHIVE_EXTENSIONS = ['.zip', '.tar.gz'];
+export const ARCHIVE_EXTENSIONS = ['.zip', '.tar.gz'];
 
 /**
  * Find the bundle output in the build directory.

@@ -187,6 +187,34 @@ describe('run', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
+  it('warns about lockfile/CLI version skew when apm install fails', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+    fs.writeFileSync(path.join(tmpDir, 'apm.lock.yaml'), "lockfile_version: '1'\napm_version: 0.10.0\n");
+    mockExec.mockImplementation(async (cmd: string, args?: string[]) =>
+      (cmd === 'apm' && args?.[0] === 'install' ? 1 : 0));
+    mockGetInput.mockImplementation((name: unknown) => (name === 'working-directory' ? tmpDir : ''));
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalledWith(expect.stringMatching(/apm install failed/));
+    expect(mockWarning).toHaveBeenCalledWith(expect.stringMatching(
+      /written by APM 0\.10\.0, but this run uses APM 0\.11\.0.*apm-version: '0\.10\.0'/,
+    ));
+  });
+
+  it('does not warn about version skew when the lockfile matches the CLI', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: t\nversion: 1.0.0\n');
+    fs.writeFileSync(path.join(tmpDir, 'apm.lock.yaml'), "lockfile_version: '1'\napm_version: 0.11.0\n");
+    mockExec.mockImplementation(async (cmd: string, args?: string[]) =>
+      (cmd === 'apm' && args?.[0] === 'install' ? 1 : 0));
+    mockGetInput.mockImplementation((name: unknown) => (name === 'working-directory' ? tmpDir : ''));
+
+    await run();
+
+    expect(mockSetFailed).toHaveBeenCalled();
+    expect(mockWarning).not.toHaveBeenCalledWith(expect.stringMatching(/written by APM/));
+  });
+
   it('creates working directory when it does not exist (isolated mode)', async () => {
     const nonExistentDir = path.join(tmpDir, 'nested', 'workdir');
     expect(fs.existsSync(nonExistentDir)).toBe(false);

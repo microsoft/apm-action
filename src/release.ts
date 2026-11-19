@@ -4,6 +4,7 @@ import * as crypto from 'node:crypto';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as yaml from 'js-yaml';
+import { ARCHIVE_EXTENSIONS } from './bundler.js';
 
 /**
  * Options for the `mode: release` umbrella.
@@ -12,7 +13,7 @@ import * as yaml from 'js-yaml';
  * vendor-neutral CLI primitives:
  *   1. apm pack --check-versions --check-clean --json  (gate)
  *   2. apm pack --offline --archive                     (per-package matrix)
- *   3. sha256sum                                        (per-tarball sidecar)
+ *   3. sha256sum                                        (per-archive sidecar)
  *   4. gh release create                                (publish)
  *
  * Each step has a CLI equivalent that works on Jenkins, GitLab, ADO, etc.
@@ -282,18 +283,21 @@ export async function runGate(
 
 /**
  * Pack a single package: `cd <dir> && apm pack --offline --archive -o <dist>`.
- * Returns the absolute path to the produced .tar.gz.
+ * Returns the absolute path to the produced archive: `.zip` on apm 0.20+
+ * (the `apm pack --archive` default since microsoft/apm#1720) or `.tar.gz`
+ * on older CLIs. Both are accepted so the action keeps working across the
+ * full range of pinnable `apm-version` values.
  *
- * Identifies the produced tarball by snapshotting `distDir` before and after
- * the pack invocation. A tarball is "produced by this call" if it is new in
+ * Identifies the produced archive by snapshotting `distDir` before and after
+ * the pack invocation. An archive is "produced by this call" if it is new in
  * `after`, or if it existed in `before` but its mtime advanced. This is
  * correct under two conditions a naive mtime heuristic gets wrong:
  *
  *   1. Monorepo runs share `distDir`. Sequential per-package pack invocations
- *      complete in <1s each, so prior tarballs from the same run fall inside
+ *      complete in <1s each, so prior archives from the same run fall inside
  *      any reasonable "newer than packStart" grace window. The before/after
- *      diff isolates exactly the tarball this invocation touched.
- *   2. Re-runs overwrite an existing tarball of the same name. A pure
+ *      diff isolates exactly the archive this invocation touched.
+ *   2. Re-runs overwrite an existing archive of the same name. A pure
  *      set-difference would miss this; mtime advance catches it.
  */
 export async function packPackage(
@@ -302,7 +306,7 @@ export async function packPackage(
 ): Promise<string> {
   fs.mkdirSync(distDir, { recursive: true });
   const before = new Map<string, number>();
-  for (const p of listTarballs(distDir)) {
+  for (const p of listArchives(distDir)) {
     before.set(p, fs.statSync(p).mtimeMs);
   }
   const rc = await exec.exec('apm', [
@@ -314,10 +318,10 @@ export async function packPackage(
   if (rc !== 0) {
     throw new Error(`apm pack failed for ${dir} (exit ${rc})`);
   }
-  const after = listTarballs(distDir);
+  const after = listArchives(distDir);
   if (after.length === 0) {
     throw new Error(
-      `apm pack in ${dir} succeeded but produced no .tar.gz in ${distDir}. `
+      `apm pack in ${dir} succeeded but produced no .zip or .tar.gz archive in ${distDir}. `
       + `Verify that the package has a 'dependencies:' block or primitives `
       + `to bundle.`,
     );
@@ -329,27 +333,27 @@ export async function packPackage(
   });
   if (touched.length === 0) {
     throw new Error(
-      `apm pack in ${dir} succeeded but no tarball in ${distDir} was added `
+      `apm pack in ${dir} succeeded but no archive in ${distDir} was added `
       + `or modified by this invocation. Filesystem clock skew?`,
     );
   }
   if (touched.length > 1) {
     // One pack invocation is expected to produce or modify exactly one
-    // tarball. More than one is a real producer-side anomaly worth surfacing
+    // archive. More than one is a real producer-side anomaly worth surfacing
     // -- the before/after diff has already filtered out prior packages in
     // the same monorepo run.
     core.warning(
-      `apm pack in ${dir} produced ${touched.length} tarballs; expected 1. `
+      `apm pack in ${dir} produced ${touched.length} archives; expected 1. `
       + `Using the most recently modified: ${touched.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0]}`,
     );
   }
   return touched.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)[0];
 }
 
-function listTarballs(dir: string): string[] {
+function listArchives(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir)
-    .filter(n => n.endsWith('.tar.gz'))
+    .filter(n => ARCHIVE_EXTENSIONS.some(ext => n.endsWith(ext)))
     .map(n => path.join(dir, n))
     .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
 }
@@ -529,7 +533,7 @@ export async function runReleaseMode(opts: ReleaseOptions): Promise<ReleaseResul
     const prerelease = resolvePrerelease(opts.releasePrerelease, tag);
     const notes = opts.releaseNotes.trim() || renderDefaultReleaseNotes(results, marketplacePath);
 
-    // Files to attach: every .tar.gz, every .sha256 sidecar, the
+    // Files to attach: every bundle archive, every .sha256 sidecar, the
     // marketplace.json (when present). Pass each path positionally; gh
     // CLI handles globless lists fine and we already know the exact set.
     const files: string[] = [];

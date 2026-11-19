@@ -290,14 +290,36 @@ describe('packPackage', () => {
     expect(tarball).toBe(path.join(distDir, 'mypkg-1.0.0.tar.gz'));
   });
 
+  it('returns the .zip archive emitted by apm 0.20+ (zip-by-default regression)', async () => {
+    mockExec.mockImplementationOnce(async () => {
+      fs.mkdirSync(distDir, { recursive: true });
+      fs.writeFileSync(path.join(distDir, 'mypkg-1.0.0.zip'), 'fake');
+      return 0;
+    });
+    const archive = await packPackage(tmpDir, distDir);
+    expect(archive).toBe(path.join(distDir, 'mypkg-1.0.0.zip'));
+  });
+
+  it('ignores .sha256 sidecars from earlier packages when locating the new archive', async () => {
+    fs.mkdirSync(distDir, { recursive: true });
+    fs.writeFileSync(path.join(distDir, 'sibling-1.0.0.zip'), 'a');
+    fs.writeFileSync(path.join(distDir, 'sibling-1.0.0.zip.sha256'), 'a-hash');
+    mockExec.mockImplementationOnce(async () => {
+      fs.writeFileSync(path.join(distDir, 'mypkg-1.0.0.zip'), 'new');
+      return 0;
+    });
+    const archive = await packPackage(tmpDir, distDir);
+    expect(archive).toBe(path.join(distDir, 'mypkg-1.0.0.zip'));
+  });
+
   it('throws when apm pack fails', async () => {
     mockExec.mockImplementationOnce(async () => 1);
     await expect(packPackage(tmpDir, distDir)).rejects.toThrow(/exit 1/);
   });
 
-  it('throws when no tarball produced', async () => {
+  it('throws when no archive produced', async () => {
     mockExec.mockImplementationOnce(async () => 0);
-    await expect(packPackage(tmpDir, distDir)).rejects.toThrow(/produced no \.tar\.gz/);
+    await expect(packPackage(tmpDir, distDir)).rejects.toThrow(/produced no \.zip or \.tar\.gz archive/);
   });
 
   it('returns the tarball even when apm pack overwrites an existing file of the same name (regression)', async () => {

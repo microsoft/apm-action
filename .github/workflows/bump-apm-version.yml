@@ -1,0 +1,161 @@
+name: Bump default APM version
+
+# Opens a PR that moves the action's default `apm-version` to the latest
+# stable microsoft/apm release. The default stays a pinned, known-good
+# version (reproducible), it just no longer goes stale: every new APM
+# release gets a reviewable PR whose CI exercises the new CLI end to end.
+#
+# Token: set the APM_VERSION_BUMP_TOKEN secret (fine-grained PAT or GitHub
+# App token with contents:write + pull-requests:write on this repo) so the
+# bump PR triggers CI. With the fallback GITHUB_TOKEN, GitHub does not run
+# workflows on the PR; close and reopen it to start CI. The fallback also
+# needs "Allow GitHub Actions to create and approve pull requests" enabled.
+
+on:
+  schedule:
+    - cron: '23 7 * * *'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'APM version to pin (e.g. 0.36.1). Empty = latest stable release.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: bump-apm-version
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ secrets.APM_VERSION_BUMP_TOKEN || github.token }}
+      REQUESTED_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          token: ${{ secrets.APM_VERSION_BUMP_TOKEN || github.token }}
+
+      - name: Resolve current and target versions
+        id: versions
+        run: |
+          set -euo pipefail
+          CURRENT=$(yq '.inputs."apm-version".default' action.yml)
+          if [ -n "$REQUESTED_VERSION" ]; then
+            TARGET="${REQUESTED_VERSION#v}"
+          else
+            TARGET=$(gh api repos/microsoft/apm/releases/latest --jq '.tag_name')
+            TARGET="${TARGET#v}"
+          fi
+          SEMVER='^[0-9]+\.[0-9]+\.[0-9]+$'
+          if ! [[ "$CURRENT" =~ $SEMVER ]]; then
+            echo "::error::Current default apm-version '$CURRENT' is not X.Y.Z"
+            exit 1
+          fi
+          if ! [[ "$TARGET" =~ $SEMVER ]]; then
+            echo "::error::Target version '$TARGET' is not a stable X.Y.Z release"
+            exit 1
+          fi
+          echo "current=$CURRENT" >> "$GITHUB_OUTPUT"
+          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
+          if [ "$TARGET" = "$CURRENT" ]; then
+            echo "Default apm-version is already $CURRENT; nothing to do."
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+          elif [ "$(printf '%s\n%s\n' "$CURRENT" "$TARGET" | sort -V | tail -n1)" != "$TARGET" ]; then
+            echo "Target $TARGET is older than current default $CURRENT; refusing to downgrade."
+            echo "bump=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Bumping default apm-version: $CURRENT -> $TARGET"
+            echo "bump=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Verify release assets and binary
+        if: steps.versions.outputs.bump == 'true'
+        env:
+          TARGET: ${{ steps.versions.outputs.target }}
+        run: |
+          set -euo pipefail
+          ASSETS=$(gh release view "v$TARGET" -R microsoft/apm --json assets --jq '.assets[].name')
+          for os_arch in linux-x86_64 linux-arm64 darwin-x86_64 darwin-arm64; do
+            for suffix in tar.gz tar.gz.sha256; do
+              name="apm-$os_arch.$suffix"
+              if ! grep -qx "$name" <<< "$ASSETS"; then
+                echo "::error::Release v$TARGET is missing asset $name; the action cannot install it."
+                exit 1
+              fi
+            done
+          done
+          WORK="$RUNNER_TEMP/apm-verify"
+          mkdir -p "$WORK"
+          gh release download "v$TARGET" -R microsoft/apm -D "$WORK" \
+            -p 'apm-linux-x86_64.tar.gz' -p 'apm-linux-x86_64.tar.gz.sha256'
+          (cd "$WORK" && sha256sum -c apm-linux-x86_64.tar.gz.sha256)
+          tar xzf "$WORK/apm-linux-x86_64.tar.gz" -C "$WORK"
+          REPORTED=$("$WORK/apm-linux-x86_64/apm" --version)
+          echo "$REPORTED"
+          if ! grep -qF "$TARGET" <<< "$REPORTED"; then
+            echo "::error::Binary reports '$REPORTED', expected $TARGET"
+            exit 1
+          fi
+
+      - name: Open bump PR
+        if: steps.versions.outputs.bump == 'true'
+        env:
+          CURRENT: ${{ steps.versions.outputs.current }}
+          TARGET: ${{ steps.versions.outputs.target }}
+        run: |
+          set -euo pipefail
+          BRANCH="automation/bump-apm-$TARGET"
+          EXISTING=$(gh pr list --head "$BRANCH" --state open --json url --jq '.[0].url // ""')
+          if [ -n "$EXISTING" ]; then
+            echo "Bump PR already open: $EXISTING"
+            exit 0
+          fi
+
+          # Every occurrence of the current default in these files refers to
+          # it (input default, "e.g." examples, README default notes). The
+          # digit guards stop 0.36.1 from matching inside 0.36.10 or 10.36.1.
+          CURRENT_RE="${CURRENT//./\\.}"
+          sed -i -E "s/(^|[^0-9.])$CURRENT_RE([^0-9]|$)/\1$TARGET\2/g" action.yml README.md
+          if [ "$(yq '.inputs."apm-version".default' action.yml)" != "$TARGET" ]; then
+            echo "::error::Failed to rewrite the apm-version default in action.yml"
+            exit 1
+          fi
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git checkout -b "$BRANCH"
+          git add action.yml README.md
+          git commit -m "chore: bump default apm-version to $TARGET"
+          git push --force origin "$BRANCH"
+
+          BODY=$(cat <<EOF
+          Bumps the action's default \`apm-version\` from \`$CURRENT\` to \`$TARGET\`.
+
+          - Release notes: https://github.com/microsoft/apm/releases/tag/v$TARGET
+          - Changelog: https://github.com/microsoft/apm/blob/v$TARGET/CHANGELOG.md
+          - Assets for linux/darwin x86_64 and arm64 are present; the linux-x86_64 binary passed sha256 and \`--version\` checks.
+
+          Before merging, review the changelog for breaking changes that affect the
+          action's own \`apm\` invocations, and let CI run the integration jobs
+          against the new CLI. If CI did not start, close and reopen this PR.
+
+          After merge, cut an apm-action release (push a \`v1.x.y\` tag) so
+          \`@v1\` users get the new default.
+          EOF
+          )
+          URL=$(gh pr create --base "${{ github.event.repository.default_branch }}" --head "$BRANCH" \
+            --title "chore: bump default apm-version to $TARGET" --body "$BODY")
+          echo "Opened $URL"
+
+          # Close older bump PRs that this one supersedes.
+          gh pr list --state open --json number,headRefName \
+            --jq ".[] | select(.headRefName | startswith(\"automation/bump-apm-\")) | select(.headRefName != \"$BRANCH\") | .number" \
+          | while read -r n; do
+              gh pr close "$n" --delete-branch --comment "Superseded by $URL"
+            done

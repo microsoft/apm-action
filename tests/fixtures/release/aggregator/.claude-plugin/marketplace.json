@@ -1,0 +1,20 @@
+{
+  "name": "aggregator-demo",
+  "owner": {
+    "name": "apm-action-tests"
+  },
+  "plugins": [
+    {
+      "name": "alpha",
+      "description": "Alpha plugin",
+      "version": "1.0.0",
+      "source": "./plugins/alpha"
+    },
+    {
+      "name": "beta",
+      "description": "Beta plugin",
+      "version": "1.0.0",
+      "source": "./plugins/beta"
+    }
+  ]
+}

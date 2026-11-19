@@ -12,12 +12,13 @@ inputs:
     default: '.'
   apm-version:
     description: |
-      APM CLI version to install (e.g. "0.14.0"). Defaults to a pinned, known-good release.
+      APM CLI version to install (e.g. "0.36.1"). Defaults to a pinned, known-good release.
       The default is intentionally NOT "latest": pinning the action to a specific APM version
       prevents downstream workflows from being broken by an unrelated APM release. Pass
       "latest" explicitly to opt in to floating, or pin to a different tag for reproducibility.
+      The default is refreshed by an automated PR when microsoft/apm publishes a new release.
     required: false
-    default: '0.14.0'
+    default: '0.36.1'
   script:
     description: 'APM script to run after install (optional — by default only install runs)'
     required: false
@@ -225,7 +226,7 @@ outputs:
   bundles-restored:
     description: 'Number of bundles successfully restored (multi-bundle mode only).'
   apm-version:
-    description: 'Resolved APM CLI version string (e.g. "0.11.0"). Always set.'
+    description: 'Resolved APM CLI version string (e.g. "0.36.1"). Always set.'
   apm-path:
     description: 'Full path to the apm executable used by the action. Resolved via tool-cache when the action installed APM, or via `which apm` when reusing a pre-existing apm on PATH.'
   packages:
