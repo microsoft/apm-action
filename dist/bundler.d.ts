@@ -75,3 +75,12 @@ export interface PackResult {
  * report path.
  */
 export declare function runPackStep(workingDir: string, opts: PackOptions): Promise<PackResult>;
+/**
+ * Recognized archive extensions, in detection order. `apm pack --archive`
+ * emits .zip by default as of apm 0.20; older CLIs (and pipelines that opt
+ * back in with --archive-format tar.gz) emit .tar.gz. The action accepts
+ * either so it stays compatible across the apm-version range it supports --
+ * pinning --archive-format on the pack call would break older CLIs that do
+ * not know the flag.
+ */
+export declare const ARCHIVE_EXTENSIONS: string[];

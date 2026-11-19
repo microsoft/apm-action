@@ -5,7 +5,7 @@
  * vendor-neutral CLI primitives:
  *   1. apm pack --check-versions --check-clean --json  (gate)
  *   2. apm pack --offline --archive                     (per-package matrix)
- *   3. sha256sum                                        (per-tarball sidecar)
+ *   3. sha256sum                                        (per-archive sidecar)
  *   4. gh release create                                (publish)
  *
  * Each step has a CLI equivalent that works on Jenkins, GitLab, ADO, etc.
@@ -98,18 +98,21 @@ export declare function runGate(workingDir: string): Promise<{
 }>;
 /**
  * Pack a single package: `cd <dir> && apm pack --offline --archive -o <dist>`.
- * Returns the absolute path to the produced .tar.gz.
+ * Returns the absolute path to the produced archive: `.zip` on apm 0.20+
+ * (the `apm pack --archive` default since microsoft/apm#1720) or `.tar.gz`
+ * on older CLIs. Both are accepted so the action keeps working across the
+ * full range of pinnable `apm-version` values.
  *
- * Identifies the produced tarball by snapshotting `distDir` before and after
- * the pack invocation. A tarball is "produced by this call" if it is new in
+ * Identifies the produced archive by snapshotting `distDir` before and after
+ * the pack invocation. An archive is "produced by this call" if it is new in
  * `after`, or if it existed in `before` but its mtime advanced. This is
  * correct under two conditions a naive mtime heuristic gets wrong:
  *
  *   1. Monorepo runs share `distDir`. Sequential per-package pack invocations
- *      complete in <1s each, so prior tarballs from the same run fall inside
+ *      complete in <1s each, so prior archives from the same run fall inside
  *      any reasonable "newer than packStart" grace window. The before/after
- *      diff isolates exactly the tarball this invocation touched.
- *   2. Re-runs overwrite an existing tarball of the same name. A pure
+ *      diff isolates exactly the archive this invocation touched.
+ *   2. Re-runs overwrite an existing archive of the same name. A pure
  *      set-difference would miss this; mtime advance catches it.
  */
 export declare function packPackage(dir: string, distDir: string): Promise<string>;

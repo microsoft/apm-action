@@ -18,9 +18,22 @@ This installs the APM CLI, reads your `apm.yml`, and runs `apm install`.
 - uses: microsoft/apm-action@v1
   with:
     compile: 'true'                    # generate AGENTS.md after install
-    apm-version: '0.7.0'              # pin a specific APM version
+    apm-version: '0.36.1'              # pin a specific APM version
     working-directory: './my-project'  # custom working directory
 ```
+
+### APM version
+
+Each apm-action release pins a known-good APM CLI as the `apm-version` default (currently `0.36.1`), so a run is reproducible for a given action ref. A scheduled workflow opens a PR to move the default whenever [microsoft/apm](https://github.com/microsoft/apm/releases) publishes a new release; `@v1` users get it with the next apm-action release.
+
+```yaml
+- uses: microsoft/apm-action@v1
+  with:
+    apm-version: '0.36.1'   # pin exactly (any release tag, with or without the leading v)
+    # apm-version: 'latest' # float to the newest APM release on every run
+```
+
+If `apm install` fails after a CLI upgrade because files deployed by an older APM are "not managed" or have "no trustworthy local deployment baseline", run `apm install` locally with the new CLI (add `--force` if it asks), then commit `apm.lock.yaml` and the deployed files. Or pin `apm-version` to the release that wrote your lockfile. The action prints this hint when it detects the version skew.
 
 ### Isolated mode (inline dependencies, no apm.yml needed)
 
@@ -41,7 +54,7 @@ Just install the APM CLI and put it on `PATH`, like `actions/setup-node`. Run an
   id: apm
   with:
     setup-only: 'true'
-    apm-version: '0.11.0'
+    apm-version: '0.36.1'
 
 - run: apm --version
 - run: apm pack -o build --format plugin
@@ -101,7 +114,7 @@ The `bundle-format` output reflects the format of the produced or restored bundl
 
 ### Pack mode (produce a bundle)
 
-Install dependencies, scan for hidden Unicode threats, and pack into a self-contained `.tar.gz` archive. Add `audit-report` to generate a SARIF report alongside the bundle:
+Install dependencies, scan for hidden Unicode threats, and pack into a self-contained archive (`.zip` on APM 0.20+, `.tar.gz` on older CLIs). Add `audit-report` to generate a SARIF report alongside the bundle:
 
 ```yaml
 - uses: microsoft/apm-action@v1
@@ -190,8 +203,8 @@ What it does, in order:
 
 1. `apm pack --check-versions --check-clean --json` -- fails the job on misaligned per-package versions or uncommitted marketplace.json drift.
 2. Detect repo shape (`aggregator` if `plugins/<name>/apm.yml` files exist, otherwise `single-plugin`).
-3. Matrix-pack every package with `apm pack --offline --archive` -> tarballs in `dist/`.
-4. Write `<tarball>.sha256` sidecars next to each tarball.
+3. Matrix-pack every package with `apm pack --offline --archive` -> archives in `dist/` (`.zip` on APM 0.20+, `.tar.gz` on older CLIs).
+4. Write `<archive>.sha256` sidecars next to each archive.
 5. Stage `marketplace-<version>.json` for aggregator shapes.
 6. Render a GitHub Step Summary table of the release contents.
 7. `gh release create <tag> <files...>` (skipped if `release-skip-publish: true`).
@@ -211,7 +224,7 @@ Restore primitives from a bundle. The action installs APM (cached across runs) a
 
 - uses: microsoft/apm-action@v1
   with:
-    bundle: './*.tar.gz'
+    bundle: './*.zip'   # .tar.gz for bundles packed by APM < 0.20
 ```
 
 <a id="multi-bundle-restore"></a>
@@ -228,7 +241,7 @@ Restore primitives from a bundle. The action installs APM (cached across runs) a
     pattern: apm-*
     path: /tmp/bundles
 
-- run: find /tmp/bundles -name '*.tar.gz' | sort > /tmp/bundle-list.txt
+- run: find /tmp/bundles \( -name '*.zip' -o -name '*.tar.gz' \) | sort > /tmp/bundle-list.txt
 
 - uses: microsoft/apm-action@v1
   id: restore
@@ -273,7 +286,7 @@ jobs:
           name: agent-bundle
       - uses: microsoft/apm-action@v1
         with:
-          bundle: './*.tar.gz'
+          bundle: './*.zip'
       # .github/ is ready — primitives deployed
 
   deploy:
@@ -286,7 +299,7 @@ jobs:
           name: agent-bundle
       - uses: microsoft/apm-action@v1
         with:
-          bundle: './*.tar.gz'
+          bundle: './*.zip'
       # Same primitives, different job. Byte-identical.
 ```
 
@@ -343,20 +356,20 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `working-directory` | No | `.` | Working directory for execution. Must exist in non-isolated mode (with your `apm.yml`). In `isolated`, `pack`, or `bundle` modes the directory is created automatically. |
-| `apm-version` | No | `latest` | APM version to install |
+| `apm-version` | No | `0.36.1` | APM CLI version to install. Pin any release (`0.36.1` or `v0.36.1`), or pass `latest` to float. See [APM version](#apm-version). |
 | `github-token` | No | `${{ github.token }}` | GitHub token for API calls. Auto-forwarded as `GITHUB_APM_PAT` so same-org private repos work with zero config. Pass a broader-scoped PAT for cross-org access. |
 | `script` | No | | APM script to run after install |
 | `dependencies` | No | | YAML array of extra dependencies to install (additive to apm.yml) |
 | `isolated` | No | `false` | Ignore apm.yml and clear pre-existing primitive dirs — install only inline dependencies |
-| `compile` | No | `false` | Run `apm compile` after install to generate AGENTS.md |
+| `compile` | No | `false` | Run `apm compile` after install to generate AGENTS.md. With `target: copilot` only, APM 0.17+ skips AGENTS.md when `.github/instructions/` already covers the same instructions; run `apm compile --force-instructions` yourself (e.g. after `setup-only`) to force it. |
 | `update` | No | `false` | Run `apm update --yes` instead of `apm install`: re-resolve branch/tag refs to their latest matching commit and rewrite `apm.lock.yaml`, then run the normal post-install steps. Use in a scheduled/dispatch job that opens a PR with the refreshed assets. Mutually exclusive with `isolated`, `setup-only`, `bundle`, `bundles-file`, and `mode`. |
-| `pack` | No | `false` | Pack a bundle after install (produces `.tar.gz` by default) |
+| `pack` | No | `false` | Pack a bundle after install (produces `.zip` by default on APM 0.20+, `.tar.gz` on older CLIs) |
 | `bundle-format` | No | `apm` | Bundle layout when `pack: true`. `apm` produces an APM bundle (with `apm.lock.yaml` and a `.github/` tree, restorable by this action). `plugin` produces a Claude Code plugin bundle (with `plugin.json` at the root, intended for marketplace consumption). |
 | `setup-only` | No | `false` | Install the APM CLI and exit. No `apm.yml` is read, no `apm install` runs, no primitives are deployed. Mutually exclusive with `pack`, `bundle`, and `bundles-file`. |
 | `bundle` | No | | Restore from a bundle (local path or glob). Installs APM and unpacks via `apm unpack` (verified). |
 | `bundles-file` | No | | Path to a UTF-8 text file with one bundle path per line. Restores N bundles into a single workspace in caller-specified order (last wins on collisions). Mutually exclusive with `pack` and `bundle`. |
 | `target` | No | | Bundle target: `copilot`, `vscode`, `claude`, or `all` (used with `pack: true`) |
-| `archive` | No | `true` | Produce `.tar.gz` instead of directory (used with `pack: true`) |
+| `archive` | No | `true` | Produce a single-file archive (`.zip` on APM 0.20+, `.tar.gz` on older CLIs) instead of a directory (used with `pack: true`) |
 | `marketplace` | No | | Forwarded to `apm pack --marketplace=<value>` (used with `pack: true`). Comma-separated format list (`claude,codex`), `all`, or `none`. Defaults to whatever is configured in `apm.yml`'s `outputs:` map. |
 | `marketplace-path` | No | | Forwarded to `apm pack --marketplace-path FORMAT=PATH` (used with `pack: true`). Repeatable: one `FORMAT=PATH` override per line. Newline is the only separator -- `,` is a legal filename character. Overrides where each marketplace format file is written. |
 | `json-output` | No | | Forwarded to `apm pack --json` (used with `pack: true`). When set, the action passes `--json` to the CLI and captures the JSON report to this path. Consume from downstream steps via the `pack-json` output. |
@@ -369,7 +382,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | Output | Description |
 |---|---|
 | `success` | Whether the action succeeded (`true`/`false`) |
-| `apm-version` | Resolved APM CLI version (e.g. `0.11.0`). Always set. |
+| `apm-version` | Resolved APM CLI version (e.g. `0.36.1`). Always set. |
 | `apm-path` | Absolute path to the resolved `apm` binary. Resolved via tool-cache when the action installed APM, or via `which apm` when reusing a pre-existing CLI on `PATH`. |
 | `bundle-format` | Format of the produced or restored bundle (`apm` or `plugin`). Set in pack and single-bundle restore modes. |
 | `primitives-path` | Path where agent primitives were deployed (`.github`) |

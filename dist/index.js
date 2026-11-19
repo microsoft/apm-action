@@ -31863,6 +31863,7 @@ module.exports = {
 
 // EXPORTS
 __nccwpck_require__.d(__webpack_exports__, {
+  EX: () => (/* binding */ ARCHIVE_EXTENSIONS),
   ly: () => (/* binding */ detectBundleFormat),
   yB: () => (/* binding */ extractBundle),
   UG: () => (/* binding */ resolveLocalBundle),
@@ -40487,6 +40488,7 @@ const external_node_path_namespaceObject = __WEBPACK_EXTERNAL_createRequire(impo
 
 
 
+
 /**
  * Resolve the release tag. Explicit input wins; otherwise fall back to
  * GITHUB_REF_NAME (set automatically when triggered by a tag push).
@@ -40702,24 +40704,27 @@ async function runGate(workingDir) {
 }
 /**
  * Pack a single package: `cd <dir> && apm pack --offline --archive -o <dist>`.
- * Returns the absolute path to the produced .tar.gz.
+ * Returns the absolute path to the produced archive: `.zip` on apm 0.20+
+ * (the `apm pack --archive` default since microsoft/apm#1720) or `.tar.gz`
+ * on older CLIs. Both are accepted so the action keeps working across the
+ * full range of pinnable `apm-version` values.
  *
- * Identifies the produced tarball by snapshotting `distDir` before and after
- * the pack invocation. A tarball is "produced by this call" if it is new in
+ * Identifies the produced archive by snapshotting `distDir` before and after
+ * the pack invocation. An archive is "produced by this call" if it is new in
  * `after`, or if it existed in `before` but its mtime advanced. This is
  * correct under two conditions a naive mtime heuristic gets wrong:
  *
  *   1. Monorepo runs share `distDir`. Sequential per-package pack invocations
- *      complete in <1s each, so prior tarballs from the same run fall inside
+ *      complete in <1s each, so prior archives from the same run fall inside
  *      any reasonable "newer than packStart" grace window. The before/after
- *      diff isolates exactly the tarball this invocation touched.
- *   2. Re-runs overwrite an existing tarball of the same name. A pure
+ *      diff isolates exactly the archive this invocation touched.
+ *   2. Re-runs overwrite an existing archive of the same name. A pure
  *      set-difference would miss this; mtime advance catches it.
  */
 async function packPackage(dir, distDir) {
     external_node_fs_namespaceObject.mkdirSync(distDir, { recursive: true });
     const before = new Map();
-    for (const p of listTarballs(distDir)) {
+    for (const p of listArchives(distDir)) {
         before.set(p, external_node_fs_namespaceObject.statSync(p).mtimeMs);
     }
     const rc = await lib_exec/* exec */.m('apm', [
@@ -40731,9 +40736,9 @@ async function packPackage(dir, distDir) {
     if (rc !== 0) {
         throw new Error(`apm pack failed for ${dir} (exit ${rc})`);
     }
-    const after = listTarballs(distDir);
+    const after = listArchives(distDir);
     if (after.length === 0) {
-        throw new Error(`apm pack in ${dir} succeeded but produced no .tar.gz in ${distDir}. `
+        throw new Error(`apm pack in ${dir} succeeded but produced no .zip or .tar.gz archive in ${distDir}. `
             + `Verify that the package has a 'dependencies:' block or primitives `
             + `to bundle.`);
     }
@@ -40744,24 +40749,24 @@ async function packPackage(dir, distDir) {
         return external_node_fs_namespaceObject.statSync(p).mtimeMs > prev;
     });
     if (touched.length === 0) {
-        throw new Error(`apm pack in ${dir} succeeded but no tarball in ${distDir} was added `
+        throw new Error(`apm pack in ${dir} succeeded but no archive in ${distDir} was added `
             + `or modified by this invocation. Filesystem clock skew?`);
     }
     if (touched.length > 1) {
         // One pack invocation is expected to produce or modify exactly one
-        // tarball. More than one is a real producer-side anomaly worth surfacing
+        // archive. More than one is a real producer-side anomaly worth surfacing
         // -- the before/after diff has already filtered out prior packages in
         // the same monorepo run.
-        lib_core/* warning */.$e(`apm pack in ${dir} produced ${touched.length} tarballs; expected 1. `
+        lib_core/* warning */.$e(`apm pack in ${dir} produced ${touched.length} archives; expected 1. `
             + `Using the most recently modified: ${touched.sort((a, b) => external_node_fs_namespaceObject.statSync(b).mtimeMs - external_node_fs_namespaceObject.statSync(a).mtimeMs)[0]}`);
     }
     return touched.sort((a, b) => external_node_fs_namespaceObject.statSync(b).mtimeMs - external_node_fs_namespaceObject.statSync(a).mtimeMs)[0];
 }
-function listTarballs(dir) {
+function listArchives(dir) {
     if (!external_node_fs_namespaceObject.existsSync(dir))
         return [];
     return external_node_fs_namespaceObject.readdirSync(dir)
-        .filter(n => n.endsWith('.tar.gz'))
+        .filter(n => bundler/* ARCHIVE_EXTENSIONS */.EX.some(ext => n.endsWith(ext)))
         .map(n => external_node_path_namespaceObject.join(dir, n))
         .sort((a, b) => external_node_fs_namespaceObject.statSync(b).mtimeMs - external_node_fs_namespaceObject.statSync(a).mtimeMs);
 }
@@ -40912,7 +40917,7 @@ async function runReleaseMode(opts) {
     if (!opts.skipPublish) {
         const prerelease = resolvePrerelease(opts.releasePrerelease, tag);
         const notes = opts.releaseNotes.trim() || renderDefaultReleaseNotes(results, marketplacePath);
-        // Files to attach: every .tar.gz, every .sha256 sidecar, the
+        // Files to attach: every bundle archive, every .sha256 sidecar, the
         // marketplace.json (when present). Pass each path positionally; gh
         // CLI handles globless lists fine and we already know the exact set.
         const files = [];
@@ -41466,7 +41471,13 @@ async function run() {
             }
             const projectVerb = update ? ['update', '--yes'] : ['install'];
             if (external_fs_.existsSync(apmYmlPath) || !depsInput) {
-                await runApm(projectVerb, resolvedDir);
+                try {
+                    await runApm(projectVerb, resolvedDir);
+                }
+                catch (err) {
+                    warnOnLockfileVersionSkew(resolvedDir, installResult.resolvedVersion);
+                    throw err;
+                }
             }
             // Install extra inline deps additively
             if (depsInput) {
@@ -41747,6 +41758,32 @@ function generateManifest(dir, deps, target) {
     external_fs_.writeFileSync(apmYmlPath, content, 'utf-8');
     const targetSuffix = target ? ` (target: ${target})` : '';
     lib_core/* info */.pq(`Generated apm.yml with ${deps.length} dependencies (isolated mode)${targetSuffix}`);
+}
+/**
+ * After a failed project install, point at the most common cause when the
+ * CLI version moves (e.g. a new `apm-version` default): an apm.lock.yaml and
+ * deployed files committed by a different APM release. For example, APM
+ * 0.36.1 refuses to overwrite skill files deployed by 0.14.0 because the old
+ * lockfile carries no trustworthy deployment baseline for them.
+ */
+function warnOnLockfileVersionSkew(dir, cliVersion) {
+    let lockVersion;
+    try {
+        const parsed = load(external_fs_.readFileSync(external_path_.join(dir, 'apm.lock.yaml'), 'utf-8'));
+        if (!parsed || parsed.apm_version == null)
+            return;
+        lockVersion = String(parsed.apm_version).replace(/^v/, '');
+    }
+    catch {
+        return;
+    }
+    const cli = cliVersion.replace(/^v/, '');
+    if (!lockVersion || lockVersion === cli)
+        return;
+    lib_core/* warning */.$e(`apm.lock.yaml was written by APM ${lockVersion}, but this run uses APM ${cli}. `
+        + `If the error mentions files APM does not manage or trust, run 'apm install' `
+        + `locally with APM ${cli} (add --force if it asks), commit apm.lock.yaml and the `
+        + `deployed files, and retry. To keep the previous CLI, set apm-version: '${lockVersion}'.`);
 }
 /**
  * Run an apm command in the given directory.

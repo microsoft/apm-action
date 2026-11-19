@@ -6,7 +6,7 @@
 #
 # Gated by APM_ACTION_E2E=1 so it does not run in unit-test job.
 # Requires: bash, node, and apm CLI (>= 0.13 with --check-versions/--check-clean
-# from microsoft/apm PR #1365) on PATH. apm 0.14.0+ once released.
+# from microsoft/apm PR #1365) on PATH. apm 0.14.0+; 0.20+ emits .zip archives.
 
 set -euo pipefail
 
@@ -96,19 +96,20 @@ run_scenario() {
     FAILED=$((FAILED + 1))
     return
   fi
-  local tarballs sidecars
-  tarballs=$(find "$dist" -maxdepth 1 -name '*.tar.gz' | wc -l | tr -d ' ')
-  sidecars=$(find "$dist" -maxdepth 1 -name '*.tar.gz.sha256' | wc -l | tr -d ' ')
-  echo "  dist/ contents: $tarballs tarball(s), $sidecars sha256 sidecar(s)"
+  # apm 0.20+ emits .zip from `apm pack --archive`; older CLIs emit .tar.gz.
+  local archives sidecars
+  archives=$(find "$dist" -maxdepth 1 \( -name '*.zip' -o -name '*.tar.gz' \) | wc -l | tr -d ' ')
+  sidecars=$(find "$dist" -maxdepth 1 \( -name '*.zip.sha256' -o -name '*.tar.gz.sha256' \) | wc -l | tr -d ' ')
+  echo "  dist/ contents: $archives archive(s), $sidecars sha256 sidecar(s)"
   ls -la "$dist" || true
 
-  if [[ "$tarballs" -lt 1 ]]; then
-    echo "FAIL ($name): expected >= 1 tarball, got $tarballs"
+  if [[ "$archives" -lt 1 ]]; then
+    echo "FAIL ($name): expected >= 1 archive, got $archives"
     FAILED=$((FAILED + 1))
     return
   fi
-  if [[ "$tarballs" != "$sidecars" ]]; then
-    echo "FAIL ($name): tarball/sidecar count mismatch ($tarballs vs $sidecars)"
+  if [[ "$archives" != "$sidecars" ]]; then
+    echo "FAIL ($name): archive/sidecar count mismatch ($archives vs $sidecars)"
     FAILED=$((FAILED + 1))
     return
   fi

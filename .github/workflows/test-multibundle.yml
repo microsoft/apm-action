@@ -54,7 +54,10 @@ jobs:
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: apm-test-${{ matrix.org }}
-          path: /tmp/apm-test-${{ matrix.org }}/build/*.tar.gz
+          # .zip on apm 0.20+, .tar.gz on older CLIs.
+          path: |
+            /tmp/apm-test-${{ matrix.org }}/build/*.zip
+            /tmp/apm-test-${{ matrix.org }}/build/*.tar.gz
           if-no-files-found: error
 
   restore-bundles:
@@ -72,7 +75,7 @@ jobs:
 
       - name: Generate bundle list file
         run: |
-          find /tmp/bundles -name '*.tar.gz' | sort > /tmp/bundle-list.txt
+          find /tmp/bundles \( -name '*.zip' -o -name '*.tar.gz' \) | sort > /tmp/bundle-list.txt
           echo '--- Bundle list ---'
           cat /tmp/bundle-list.txt
           echo '---'

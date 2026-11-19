@@ -24,6 +24,16 @@ npm run test       # jest
 
 Source lives in `src/`. The compiled bundle in `dist/index.js` is what the action runs.
 
+## Releasing
+
+- Push a `v1.x.y` tag on `main`. CI then moves the floating `v1` tag and creates the GitHub Release.
+- The `apm-version` default in `action.yml` pins a known-good APM CLI. The
+  `Bump default APM version` workflow (daily, or run it manually) opens a PR
+  when microsoft/apm publishes a new release. Review the APM changelog, let CI
+  pass, merge, then cut a release so `@v1` users get the new default. Set the
+  `APM_VERSION_BUMP_TOKEN` secret so bump PRs trigger CI; with the fallback
+  `GITHUB_TOKEN`, close and reopen the PR to start CI.
+
 ## License
 
 APM-owned code and documentation are licensed under [Apache-2.0](LICENSE).

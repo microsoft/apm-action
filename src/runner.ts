@@ -536,7 +536,12 @@ export async function run(): Promise<void> {
       }
       const projectVerb = update ? ['update', '--yes'] : ['install'];
       if (fs.existsSync(apmYmlPath) || !depsInput) {
-        await runApm(projectVerb, resolvedDir);
+        try {
+          await runApm(projectVerb, resolvedDir);
+        } catch (err) {
+          warnOnLockfileVersionSkew(resolvedDir, installResult.resolvedVersion);
+          throw err;
+        }
       }
 
       // Install extra inline deps additively
@@ -850,6 +855,33 @@ function generateManifest(dir: string, deps: Dependency[], target?: string): voi
   fs.writeFileSync(apmYmlPath, content, 'utf-8');
   const targetSuffix = target ? ` (target: ${target})` : '';
   core.info(`Generated apm.yml with ${deps.length} dependencies (isolated mode)${targetSuffix}`);
+}
+
+/**
+ * After a failed project install, point at the most common cause when the
+ * CLI version moves (e.g. a new `apm-version` default): an apm.lock.yaml and
+ * deployed files committed by a different APM release. For example, APM
+ * 0.36.1 refuses to overwrite skill files deployed by 0.14.0 because the old
+ * lockfile carries no trustworthy deployment baseline for them.
+ */
+function warnOnLockfileVersionSkew(dir: string, cliVersion: string): void {
+  let lockVersion: string;
+  try {
+    const parsed = yaml.load(fs.readFileSync(path.join(dir, 'apm.lock.yaml'), 'utf-8')) as
+      { apm_version?: unknown } | null;
+    if (!parsed || parsed.apm_version == null) return;
+    lockVersion = String(parsed.apm_version).replace(/^v/, '');
+  } catch {
+    return;
+  }
+  const cli = cliVersion.replace(/^v/, '');
+  if (!lockVersion || lockVersion === cli) return;
+  core.warning(
+    `apm.lock.yaml was written by APM ${lockVersion}, but this run uses APM ${cli}. `
+    + `If the error mentions files APM does not manage or trust, run 'apm install' `
+    + `locally with APM ${cli} (add --force if it asks), commit apm.lock.yaml and the `
+    + `deployed files, and retry. To keep the previous CLI, set apm-version: '${lockVersion}'.`,
+  );
 }
 
 /**
