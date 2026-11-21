@@ -523,7 +523,7 @@ jobs:
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
 
-      - name: Create test apm.yml + commit a baseline lockfile
+      - name: Create test apm.yml
         run: |
           # Configure git identity so we can commit in the runner.
           git config user.email "ci@apm-action.local"
@@ -542,15 +542,21 @@ jobs:
               - microsoft/apm-sample-package
           EOF
 
-          # Commit a placeholder apm.lock.yaml so it is *tracked* by git.
-          # This is the precondition that makes the bug fire: the file in
+      # Generate a REAL lockfile for the baseline. No lockfile exists yet, so
+      # this is a normal (non-frozen) install. A hand-written placeholder no
+      # longer works: since APM 0.37 a committed lockfile under CI installs as
+      # --frozen, and a placeholder is out of sync with apm.yml.
+      - name: Generate the baseline lockfile (default install)
+        uses: ./
+
+      - name: Commit the tracked baseline (apm.yml + apm.lock.yaml)
+        run: |
+          test -f apm.lock.yaml || { echo "::error::install did not create apm.lock.yaml"; exit 1; }
+
+          # Commit apm.lock.yaml so it is *tracked* by git. This is the
+          # precondition that makes the bug fire: the file in
           # working-directory is tracked, so any extraneous write to it
           # surfaces in `git status` and blocks subsequent `git checkout`.
-          cat > apm.lock.yaml << 'EOF'
-          # placeholder lockfile - replaced by pack step below
-          version: 1
-          packages: {}
-          EOF
           git add apm.yml apm.lock.yaml
           git commit -m "test fixture: tracked apm.yml + apm.lock.yaml" --quiet
 
