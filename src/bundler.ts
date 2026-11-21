@@ -3,6 +3,7 @@ import * as exec from '@actions/exec';
 import * as glob from '@actions/glob';
 import * as fs from 'fs';
 import * as path from 'path';
+import { restoreProjectMetadata, snapshotProjectMetadata } from './project-metadata.js';
 
 export type BundleFormat = 'apm' | 'plugin';
 
@@ -155,9 +156,15 @@ export async function extractBundle(bundlePath: string, outputDir: string): Prom
 
   if (apmAvailable) {
     core.info('Using apm unpack (with verification)...');
-    const rc = await exec.exec('apm', ['unpack', resolvedBundle, '-o', resolvedOutput], {
-      ignoreReturnCode: true,
-    });
+    const metadata = snapshotProjectMetadata(resolvedOutput);
+    let rc: number;
+    try {
+      rc = await exec.exec('apm', ['unpack', resolvedBundle, '-o', resolvedOutput], {
+        ignoreReturnCode: true,
+      });
+    } finally {
+      restoreProjectMetadata(resolvedOutput, metadata);
+    }
     if (rc !== 0) {
       throw new Error(`apm unpack failed with exit code ${rc}`);
     }

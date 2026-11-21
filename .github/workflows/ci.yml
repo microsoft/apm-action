@@ -566,6 +566,15 @@ jobs:
           BASELINE_SHA=$(git rev-parse HEAD)
           echo "BASELINE_SHA=$BASELINE_SHA" >> "$GITHUB_ENV"
 
+          # Simulate the triggering PR of the gh-aw pull_request_target flow: a
+          # commit on top of the baseline that changes the tracked apm.lock.yaml.
+          git checkout -q -b ci/simulated-pr
+          printf '# simulated PR change\n' >> apm.lock.yaml
+          git add apm.lock.yaml
+          git commit -m "simulated PR: change apm.lock.yaml" --quiet
+          echo "PR_SHA=$(git rev-parse HEAD)" >> "$GITHUB_ENV"
+          git checkout -q ci/restore-clean-workspace-test
+
       - name: Pack bundle
         id: pack
         uses: ./
@@ -616,6 +625,22 @@ jobs:
             exit 1
           fi
           echo "✅ Primitives deployed under .github/"
+
+      - name: Assert checking out the PR ref succeeds (gh-aw pull_request_target flow)
+        run: |
+          # gh-aw restores into the base checkout, then switches to the PR ref.
+          # The PR changes apm.lock.yaml, so a restore that left the tracked
+          # lockfile modified makes this switch abort with "Your local changes
+          # to the following files would be overwritten by checkout:
+          # apm.lock.yaml" (#26; with APM >= 0.37 apm unpack records deployments
+          # in the project lockfile, microsoft/apm#4157).
+          if ! git checkout "$PR_SHA" 2>checkout.err; then
+            echo "::error::git checkout of the PR ref failed after restore -- #26 regression"
+            cat checkout.err
+            exit 1
+          fi
+          git checkout -q ci/restore-clean-workspace-test
+          echo "✅ Post-restore checkout of the PR ref succeeded"
 
       - name: Assert subsequent git checkout succeeds (the actual #26 symptom)
         run: |

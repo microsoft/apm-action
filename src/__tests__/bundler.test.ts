@@ -143,6 +143,61 @@ describe('extractBundle', () => {
     expect(unpackCall).toBeTruthy();
   });
 
+  // microsoft/apm-action#26 under APM >= 0.37: `apm unpack` into an APM project
+  // records its deployments in the project's apm.lock.yaml (microsoft/apm#4157).
+  // The restore must still leave apm.yml and apm.lock.yaml byte-identical.
+  it('keeps apm.yml and apm.lock.yaml unchanged when apm unpack rewrites them', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: proj\n');
+    fs.writeFileSync(path.join(tmpDir, 'apm.lock.yaml'), 'lockfile_version: 4\n');
+    mockExec.mockImplementation(async (cmd, args?) => {
+      if (cmd === 'apm' && args?.[0] === '--version') return 0;
+      if (cmd === 'apm' && args?.[0] === 'unpack') {
+        fs.writeFileSync(path.join(tmpDir, 'apm.lock.yaml'), 'lockfile_version: 4\nowners: [local-bundle]\n');
+        fs.writeFileSync(path.join(tmpDir, 'apm.yml'), 'name: rewritten\n');
+        fs.mkdirSync(path.join(tmpDir, '.github', 'agents'), { recursive: true });
+        fs.writeFileSync(path.join(tmpDir, '.github', 'agents', 'foo.md'), 'agent');
+        return 0;
+      }
+      return 1;
+    });
+
+    await extractBundle(bundlePath, tmpDir);
+
+    expect(fs.readFileSync(path.join(tmpDir, 'apm.lock.yaml'), 'utf8')).toBe('lockfile_version: 4\n');
+    expect(fs.readFileSync(path.join(tmpDir, 'apm.yml'), 'utf8')).toBe('name: proj\n');
+    expect(fs.existsSync(path.join(tmpDir, '.github', 'agents', 'foo.md'))).toBe(true);
+  });
+
+  it('removes an apm.lock.yaml that apm unpack created where none existed', async () => {
+    mockExec.mockImplementation(async (cmd, args?) => {
+      if (cmd === 'apm' && args?.[0] === '--version') return 0;
+      if (cmd === 'apm' && args?.[0] === 'unpack') {
+        fs.writeFileSync(path.join(tmpDir, 'apm.lock.yaml'), 'created\n');
+        return 0;
+      }
+      return 1;
+    });
+
+    await extractBundle(bundlePath, tmpDir);
+
+    expect(fs.existsSync(path.join(tmpDir, 'apm.lock.yaml'))).toBe(false);
+  });
+
+  it('keeps project metadata unchanged even when apm unpack fails', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'apm.lock.yaml'), 'lockfile_version: 4\n');
+    mockExec.mockImplementation(async (cmd, args?) => {
+      if (cmd === 'apm' && args?.[0] === '--version') return 0;
+      if (cmd === 'apm' && args?.[0] === 'unpack') {
+        fs.writeFileSync(path.join(tmpDir, 'apm.lock.yaml'), 'half-written\n');
+        return 1;
+      }
+      return 1;
+    });
+
+    await expect(extractBundle(bundlePath, tmpDir)).rejects.toThrow('apm unpack failed');
+    expect(fs.readFileSync(path.join(tmpDir, 'apm.lock.yaml'), 'utf8')).toBe('lockfile_version: 4\n');
+  });
+
   it('falls back to tar when apm is not available', async () => {
     mockExec.mockImplementation(async (cmd, args?) => {
       if (cmd === 'apm' && args?.[0] === '--version') return 1;

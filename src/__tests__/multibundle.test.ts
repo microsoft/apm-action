@@ -238,6 +238,30 @@ describe('restoreMultiBundles', () => {
     fs.rmSync(outDir, { recursive: true, force: true });
   });
 
+  // microsoft/apm-action#26 under APM >= 0.37 (microsoft/apm#4157): every
+  // `apm unpack` may record deployments in the project lockfile; the restore
+  // leaves apm.yml and apm.lock.yaml byte-identical across all bundles.
+  it('keeps apm.yml and apm.lock.yaml unchanged across all unpacks', async () => {
+    fs.writeFileSync(path.join(outDir, 'apm.yml'), 'name: proj\n');
+    fs.writeFileSync(path.join(outDir, 'apm.lock.yaml'), 'lockfile_version: 4\n');
+    let n = 0;
+    mockExec.mockImplementation(async (cmd, args) => {
+      if (cmd === 'apm' && args?.[0] === '--version') return 0;
+      if (cmd === 'apm' && args?.[0] === 'unpack') {
+        n += 1;
+        fs.appendFileSync(path.join(outDir, 'apm.lock.yaml'), `owners: [bundle-${n}]\n`);
+        return 0;
+      }
+      return 1;
+    });
+
+    await restoreMultiBundles(['/abs/a.tar.gz', '/abs/b.tar.gz'], outDir);
+
+    expect(n).toBe(2);
+    expect(fs.readFileSync(path.join(outDir, 'apm.lock.yaml'), 'utf8')).toBe('lockfile_version: 4\n');
+    expect(fs.readFileSync(path.join(outDir, 'apm.yml'), 'utf8')).toBe('name: proj\n');
+  });
+
   it('calls apm unpack per bundle in caller order', async () => {
     const bundles = ['/abs/a.tar.gz', '/abs/b.tar.gz', '/abs/c.tar.gz'];
     const result = await restoreMultiBundles(bundles, outDir);

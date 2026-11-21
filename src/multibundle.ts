@@ -7,6 +7,7 @@ import * as exec from '@actions/exec';
 import * as fs from 'fs';
 import * as path from 'path';
 import { detectBundleFormat } from './bundler.js';
+import { restoreProjectMetadata, snapshotProjectMetadata } from './project-metadata.js';
 
 /**
  * Env-var denylist stripped from the apm unpack subprocess (B7).
@@ -309,6 +310,25 @@ export async function restoreMultiBundles(
     );
   }
 
+  const metadata = snapshotProjectMetadata(resolvedOutput);
+  try {
+    await unpackInOrder(bundles, resolvedOutput, env);
+  } finally {
+    restoreProjectMetadata(resolvedOutput, metadata);
+  }
+
+  return {
+    count: total,
+    collisions: { sameSha: [], differentSha: [] },
+  };
+}
+
+async function unpackInOrder(
+  bundles: string[],
+  resolvedOutput: string,
+  env: Record<string, string>,
+): Promise<void> {
+  const total = bundles.length;
   for (let i = 0; i < total; i++) {
     const bundle = bundles[i];
     const human = `bundle ${i + 1} of ${total}`;
@@ -335,9 +355,4 @@ export async function restoreMultiBundles(
     // alone without re-reading the surrounding 'Unpacking' lines.
     core.info(`[${human}] OK`);
   }
-
-  return {
-    count: total,
-    collisions: { sameSha: [], differentSha: [] },
-  };
 }
