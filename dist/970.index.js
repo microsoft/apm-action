@@ -19,10 +19,12 @@ export const modules = {
 /* harmony import */ var path__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(6928);
 /* harmony import */ var path__WEBPACK_IMPORTED_MODULE_3___default = /*#__PURE__*/__webpack_require__.n(path__WEBPACK_IMPORTED_MODULE_3__);
 /* harmony import */ var _bundler_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(2744);
+/* harmony import */ var _project_metadata_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(1478);
 // Gap #1 resolution: `apm unpack --dry-run` IS available in the installed apm CLI
 // (verified via `apm unpack --help` during Phase 2). However, full collision
 // detection across N bundles is deferred to a follow-up PR per the design plan;
 // `previewBundleFiles` is therefore stubbed to return an empty CollisionReport.
+
 
 
 
@@ -242,6 +244,20 @@ async function restoreMultiBundles(bundles, outputDir) {
             + "(or 'apm pack --format apm --archive'), or remove these entries from the "
             + 'bundles-file.');
     }
+    const metadata = (0,_project_metadata_js__WEBPACK_IMPORTED_MODULE_5__/* .snapshotProjectMetadata */ .J)(resolvedOutput);
+    try {
+        await unpackInOrder(bundles, resolvedOutput, env);
+    }
+    finally {
+        (0,_project_metadata_js__WEBPACK_IMPORTED_MODULE_5__/* .restoreProjectMetadata */ .d)(resolvedOutput, metadata);
+    }
+    return {
+        count: total,
+        collisions: { sameSha: [], differentSha: [] },
+    };
+}
+async function unpackInOrder(bundles, resolvedOutput, env) {
+    const total = bundles.length;
     for (let i = 0; i < total; i++) {
         const bundle = bundles[i];
         const human = `bundle ${i + 1} of ${total}`;
@@ -263,10 +279,6 @@ async function restoreMultiBundles(bundles, outputDir) {
         // alone without re-reading the surrounding 'Unpacking' lines.
         _actions_core__WEBPACK_IMPORTED_MODULE_0__/* .info */ .pq(`[${human}] OK`);
     }
-    return {
-        count: total,
-        collisions: { sameSha: [], differentSha: [] },
-    };
 }
 
 

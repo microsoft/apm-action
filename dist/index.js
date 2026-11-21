@@ -32847,7 +32847,10 @@ function glob_hashFiles(patterns_1) {
     });
 }
 //# sourceMappingURL=glob.js.map
+// EXTERNAL MODULE: ./src/project-metadata.ts
+var project_metadata = __nccwpck_require__(1478);
 ;// CONCATENATED MODULE: ./src/bundler.ts
+
 
 
 
@@ -32975,9 +32978,16 @@ async function extractBundle(bundlePath, outputDir) {
     }).catch(() => 1) === 0;
     if (apmAvailable) {
         lib_core/* info */.pq('Using apm unpack (with verification)...');
-        const rc = await exec/* exec */.m('apm', ['unpack', resolvedBundle, '-o', resolvedOutput], {
-            ignoreReturnCode: true,
-        });
+        const metadata = (0,project_metadata/* snapshotProjectMetadata */.J)(resolvedOutput);
+        let rc;
+        try {
+            rc = await exec/* exec */.m('apm', ['unpack', resolvedBundle, '-o', resolvedOutput], {
+                ignoreReturnCode: true,
+            });
+        }
+        finally {
+            (0,project_metadata/* restoreProjectMetadata */.d)(resolvedOutput, metadata);
+        }
         if (rc !== 0) {
             throw new Error(`apm unpack failed with exit code ${rc}`);
         }
@@ -33205,6 +33215,68 @@ function countFilesRecursive(dir) {
         }
     }
     return count;
+}
+
+
+/***/ }),
+
+/***/ 1478:
+/***/ ((__unused_webpack_module, __webpack_exports__, __nccwpck_require__) => {
+
+/* harmony export */ __nccwpck_require__.d(__webpack_exports__, {
+/* harmony export */   J: () => (/* binding */ snapshotProjectMetadata),
+/* harmony export */   d: () => (/* binding */ restoreProjectMetadata)
+/* harmony export */ });
+/* harmony import */ var _actions_core__WEBPACK_IMPORTED_MODULE_0__ = __nccwpck_require__(6058);
+/* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_1__ = __nccwpck_require__(9896);
+/* harmony import */ var fs__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__nccwpck_require__.n(fs__WEBPACK_IMPORTED_MODULE_1__);
+/* harmony import */ var path__WEBPACK_IMPORTED_MODULE_2__ = __nccwpck_require__(6928);
+/* harmony import */ var path__WEBPACK_IMPORTED_MODULE_2___default = /*#__PURE__*/__nccwpck_require__.n(path__WEBPACK_IMPORTED_MODULE_2__);
+
+
+
+/**
+ * apm.yml and apm.lock.yaml in the restore target are the project's own
+ * metadata, not bundle output: a restore must leave them exactly as it found
+ * them (microsoft/apm-action#26). Since APM 0.37, `apm unpack` into an APM
+ * project records the files it deploys in that project's apm.lock.yaml
+ * (microsoft/apm#4157), which dirties a tracked lockfile and breaks the
+ * gh-aw pull_request_target checkout of the PR ref after restore.
+ *
+ * `apm unpack` still runs against the real project (its admission checks read
+ * the project), and the action then puts both files back byte for byte.
+ */
+const PROJECT_METADATA_FILES = ['apm.yml', 'apm.lock.yaml'];
+function snapshotProjectMetadata(dir) {
+    const snapshot = new Map();
+    for (const name of PROJECT_METADATA_FILES) {
+        const file = path__WEBPACK_IMPORTED_MODULE_2__.join(dir, name);
+        snapshot.set(name, fs__WEBPACK_IMPORTED_MODULE_1__.existsSync(file) ? fs__WEBPACK_IMPORTED_MODULE_1__.readFileSync(file) : null);
+    }
+    return snapshot;
+}
+/** Put every metadata file back as snapshotted; returns the names it restored. */
+function restoreProjectMetadata(dir, snapshot) {
+    const restored = [];
+    for (const [name, before] of snapshot) {
+        const file = path__WEBPACK_IMPORTED_MODULE_2__.join(dir, name);
+        const exists = fs__WEBPACK_IMPORTED_MODULE_1__.existsSync(file);
+        if (before === null) {
+            if (exists) {
+                fs__WEBPACK_IMPORTED_MODULE_1__.rmSync(file, { force: true });
+                restored.push(name);
+            }
+        }
+        else if (!exists || !fs__WEBPACK_IMPORTED_MODULE_1__.readFileSync(file).equals(before)) {
+            fs__WEBPACK_IMPORTED_MODULE_1__.writeFileSync(file, before);
+            restored.push(name);
+        }
+    }
+    if (restored.length > 0) {
+        _actions_core__WEBPACK_IMPORTED_MODULE_0__/* .info */ .pq(`Kept project metadata unchanged by the restore: ${restored.join(', ')} `
+            + '(bundle restore never modifies apm.yml or apm.lock.yaml; see microsoft/apm-action#26)');
+    }
+    return restored;
 }
 
 
