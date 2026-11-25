@@ -18,18 +18,18 @@ This installs the APM CLI, reads your `apm.yml`, and runs `apm install`.
 - uses: microsoft/apm-action@v1
   with:
     compile: 'true'                    # generate AGENTS.md after install
-    apm-version: '0.37.0'              # pin a specific APM version
+    apm-version: '0.38.1'              # pin a specific APM version
     working-directory: './my-project'  # custom working directory
 ```
 
 ### APM version
 
-Each apm-action release pins a known-good APM CLI as the `apm-version` default (currently `0.37.0`), so a run is reproducible for a given action ref. A scheduled workflow opens a PR to move the default whenever [microsoft/apm](https://github.com/microsoft/apm/releases) publishes a new release; `@v1` users get it with the next apm-action release.
+Each apm-action release pins a known-good APM CLI as the `apm-version` default (currently `0.38.1`), so a run is reproducible for a given action ref. A scheduled workflow opens a PR to move the default whenever [microsoft/apm](https://github.com/microsoft/apm/releases) publishes a new release; `@v1` users get it with the next apm-action release.
 
 ```yaml
 - uses: microsoft/apm-action@v1
   with:
-    apm-version: '0.37.0'   # pin exactly (any release tag, with or without the leading v)
+    apm-version: '0.38.1'   # pin exactly (any release tag, with or without the leading v)
     # apm-version: 'latest' # float to the newest APM release on every run
 ```
 
@@ -54,7 +54,7 @@ Just install the APM CLI and put it on `PATH`, like `actions/setup-node`. Run an
   id: apm
   with:
     setup-only: 'true'
-    apm-version: '0.37.0'
+    apm-version: '0.38.1'
 
 - run: apm --version
 - run: apm pack -o build --format plugin
@@ -356,7 +356,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | Input | Required | Default | Description |
 |---|---|---|---|
 | `working-directory` | No | `.` | Working directory for execution. Must exist in non-isolated mode (with your `apm.yml`). In `isolated`, `pack`, or `bundle` modes the directory is created automatically. |
-| `apm-version` | No | `0.37.0` | APM CLI version to install. Pin any release (`0.37.0` or `v0.37.0`), or pass `latest` to float. See [APM version](#apm-version). |
+| `apm-version` | No | `0.38.1` | APM CLI version to install. Pin any release (`0.38.1` or `v0.38.1`), or pass `latest` to float. See [APM version](#apm-version). |
 | `github-token` | No | `${{ github.token }}` | GitHub token for API calls. Auto-forwarded as `GITHUB_APM_PAT` so same-org private repos work with zero config. Pass a broader-scoped PAT for cross-org access. |
 | `script` | No | | APM script to run after install |
 | `dependencies` | No | | YAML array of extra dependencies to install (additive to apm.yml) |
@@ -382,7 +382,7 @@ For multi-org or multi-platform scenarios, use the `env:` block for full control
 | Output | Description |
 |---|---|
 | `success` | Whether the action succeeded (`true`/`false`) |
-| `apm-version` | Resolved APM CLI version (e.g. `0.37.0`). Always set. |
+| `apm-version` | Resolved APM CLI version (e.g. `0.38.1`). Always set. |
 | `apm-path` | Absolute path to the resolved `apm` binary. Resolved via tool-cache when the action installed APM, or via `which apm` when reusing a pre-existing CLI on `PATH`. |
 | `bundle-format` | Format of the produced or restored bundle (`apm` or `plugin`). Set in pack and single-bundle restore modes. |
 | `primitives-path` | Path where agent primitives were deployed (`.github`) |
